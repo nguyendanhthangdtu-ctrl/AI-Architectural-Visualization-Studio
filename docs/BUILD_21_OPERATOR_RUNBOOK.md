@@ -121,6 +121,9 @@ RUN_LIVE_PROVIDER_SMOKE_TEST=true GEMINI_API_KEY=<real key> \
 - The test cleans up every asset it creates via the real `DELETE` route.
 - **A PASS here is the only evidence that changes a provider's status from
   "configured" to "actually working."** Nothing else does.
+- **BUILD 24**: this is also the release gate for declaring PRODUCTION READY (as opposed to
+  PRODUCTION CANDIDATE) — see `docs/BUILD_24_PRODUCTION_READINESS.md` for the full release
+  checklist and the exact result of the last release-validation attempt.
 
 ## 8. Testing email
 

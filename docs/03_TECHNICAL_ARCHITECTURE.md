@@ -1763,3 +1763,31 @@ verified gaps rather than rebuilding an already-working pipeline (CLAUDE.md rule
   closeable without a real credential was closed and tested; the remaining gap is exclusively the same
   external dependency already named across BUILD 19-22: at least one real AI provider key exercised once via
   `live-provider-smoke.test.ts`.
+
+## 38. BUILD 24 Live AI Provider Activation & Production Readiness Record
+
+Full writeup: `docs/BUILD_24_PRODUCTION_READINESS.md`. This gate is a release-validation gate, not an
+implementation gate — no application code changed. It re-ran every deterministic release check against
+BUILD 23's baseline (`37b2a61`), verified `/health`/`/ready` against a real running process (not just unit
+tests), and attempted the gated live AI generation smoke test.
+
+- **Zero credentials exist in this environment** (checked directly against `process.env` — `GEMINI_API_KEY`,
+  `NANO_BANANA_API_KEY`, `CHATGPT_IMAGE_API_KEY`, `VEO_API_KEY`, `RESEND_API_KEY` all `MISSING`, no `.env`
+  file) — confirmed, not assumed, before any other work began.
+- **Deterministic gates**: typecheck, the full 569/569 (3 skipped) test suite, lint, and production build all
+  re-ran clean against BUILD 23's exact baseline — zero regression, zero new defect found.
+- **Live health/readiness re-verified against a real process** (not only automated tests) — a real
+  `node apps/api/dist/server.js`, real file-backed SQLite, real local-disk asset store, a transient
+  self-generated `REGISTRATION_SECRET` (deleted after the run, never logged): `GET /health` → real `200`;
+  `GET /ready` → real `200`, every provider correctly reported `configured: false` without flipping overall
+  readiness; a real `POST /projects/:id/generations` with no provider key configured returned a real, clean
+  `503 PROVIDER_NOT_CONFIGURED` — no crash, no leaked secret.
+- **Live AI generation smoke test: SKIPPED — EXTERNAL DEPENDENCY.** `live-provider-smoke.test.ts` and
+  `live-email-smoke.test.ts` (both unchanged since BUILD 21/22) correctly skip all 5 of their gated tests with
+  zero network calls. No live generation was attempted or claimed anywhere in this gate.
+- **No code changes were needed or made** — this gate found no release-blocking defect requiring a fix; only
+  documentation was added (`docs/BUILD_24_PRODUCTION_READINESS.md`) and this record.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, per this gate's own explicit rule that
+  PRODUCTION READY requires a successful real live AI generation. The blocker is entirely external (no AI
+  provider credential exists in this environment) — not an internal code, security, or test defect, so this is
+  correctly NOT "RELEASE BLOCKED."
