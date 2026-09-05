@@ -1662,3 +1662,58 @@ directly against `process.env`, not assumed) and none was fabricated.
   gap is exclusively the same external dependency BUILD 19/20 already named: at least one real AI provider key
   exercised once via `live-provider-smoke.test.ts`, plus a real email vendor if password recovery must deliver
   real email in production.
+
+## 36. BUILD 22 Real Email Vendor Integration Record
+
+Full architecture writeup: `docs/BUILD_22_EMAIL_INTEGRATION.md`. Operator steps: `docs/BUILD_21_OPERATOR_RUNBOOK.md`
+§8 (updated in place — no duplicate runbook created). Closes BUILD 19/20/21's named "real email vendor" gap
+structurally; the credential itself still doesn't exist in this environment, so live delivery remains unproven.
+
+- **Real vendor implemented: Resend** (`apps/api/src/auth/resend-email-sender.ts`, new) — a single-endpoint
+  JSON REST API, no vendor SDK, matching every AI adapter's existing "raw fetch" convention. Selected via
+  `EMAIL_PROVIDER=resend` (new, `env.ts`, a real validated `z.literal('resend').optional()` — exactly one real
+  vendor or unset, same "one provider deliberately, not several" reasoning BUILD 21 applied to AI providers).
+  Unset (the default) keeps BUILD 19's exact `InMemoryEmailSender` behavior, unchanged.
+- **`EmailSender` extended, not replaced** (`email-sender.ts`) — `EmailMessage` gained optional `html`/
+  `replyTo`/`idempotencyKey`; `send()` now resolves to a real `EmailSendResult` instead of `void`. Both changes
+  are backward compatible (the one existing caller never inspected the old `void` return). A new shared
+  `validateEmailMessage()` (real recipient-format/subject/size validation, reusing zod's `.email()` the same
+  way `schemas.ts` already does) runs before either implementation does anything vendor-specific — never
+  duplicated per-adapter (CLAUDE.md rule 9).
+- **A real bug this build both introduced-the-possibility-of and fixed in the same change**
+  (`auth-routes.ts`'s `handleRequestPasswordReset`) — `emailSender.send()` is only ever called for a KNOWN
+  account; before this build it could never throw (`InMemoryEmailSender` never fails), so an unhandled
+  failure escaping as a different HTTP response was a latent, previously-unreachable enumeration
+  side-channel that only became real once a vendor that CAN fail existed. Fixed by catching the send and
+  always returning the identical generic 202 either way (logging the failure safely instead) — covered by a
+  new dedicated regression test.
+- **Standardized error taxonomy reused, not reinvented** — `resend-email-sender.ts` classifies every failure
+  via BUILD 21's `classifyProviderHttpStatus()` unchanged, into `EMAIL_PROVIDER_ERROR` (new, 502) +
+  `providerCode` (`PROVIDER_AUTH_FAILED`/`RATE_LIMITED`/`TIMEOUT`/`UNAVAILABLE`/`INVALID_REQUEST`), plus a
+  synchronous `PROVIDER_NOT_CONFIGURED` (503, reused) when no key is set — the exact same runtime guard every
+  AI adapter already carries.
+- **Bounded retry + real idempotency** — unlike BUILD 21's deliberate no-auto-retry decision for AI generation
+  (a duplicate image is a real, uncontrolled cost), a duplicate email is a nuisance, not a $ cost, so a
+  bounded (default 3 attempts), linearly-backed-off retry on classified-retryable failures only (never
+  auth/validation) is the safer default here — protected against actually duplicating delivery by a real,
+  documented Resend `Idempotency-Key` header, populated from the password-reset token's own hash (already
+  computed before the send, already unique per request).
+- **`GET /ready` gained `providers.email.configured`** (`readiness.ts`, `app-context.ts`'s
+  `providerConfiguration.email`) — same "key-presence only, never called verified" policy BUILD 21 established
+  for the four AI providers; never affects overall `/ready` `status`.
+- **New observability** — one structured, secret-free log line per password-reset email attempt
+  (`context.logger`, reusing BUILD 18/21's existing `Logger`), matching the per-generation-attempt pattern
+  BUILD 21 already introduced.
+- **Live email vendor**: unconfigured — zero `RESEND_API_KEY`/`EMAIL_FROM`/`EMAIL_TEST_RECIPIENT` exist in
+  this environment, so `live-email-smoke.test.ts` (new, opt-in via `RUN_LIVE_EMAIL_SMOKE_TEST=true`, mirrors
+  `live-provider-smoke.test.ts`'s exact gating pattern) correctly skips. No live delivery is claimed anywhere
+  in this build.
+- **559/559 tests pass, 3 correctly skipped** (was 527/1 at the end of BUILD 21 — +32 new tests: shared
+  validation, `InMemoryEmailSender`, the Resend adapter's success/auth-failure/rate-limit-retry/timeout-retry/
+  bounded-give-up/secret-safety paths, the env fail-fast rules, the new readiness field, and the anti-
+  enumeration regression); typecheck, lint, and production build all clean; the built `apps/web` bundle
+  grepped for every email config name — zero matches.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, not PRODUCTION READY. Every structural gap
+  closeable without a real credential was closed and tested; the remaining gap is exclusively the same
+  external dependency already named: a real `RESEND_API_KEY` + verified sender domain, exercised once via
+  `live-email-smoke.test.ts`.

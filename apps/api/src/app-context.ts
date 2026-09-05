@@ -49,6 +49,7 @@ import { InMemoryJobQueue, type JobQueue } from './job-queue.js';
 import { createAssetUrlSigner, type AssetUrlSigner } from './signed-asset-url.js';
 import { createLocalIdentityProvider, type IdentityProvider } from './auth/identity-provider.js';
 import { InMemoryEmailSender, type EmailSender } from './auth/email-sender.js';
+import { createResendEmailSender } from './auth/resend-email-sender.js';
 import { DEFAULT_RESET_TOKEN_TTL_MS } from './auth/auth-routes.js';
 
 /** docs/16 "Rate limit expensive AI endpoints" — applied to analysis/reference/generation/edit/view/video/QC/regenerate routes (server.ts). */
@@ -114,6 +115,8 @@ export interface AppContext {
     nanoBanana: boolean;
     chatgptImage: boolean;
     veo: boolean;
+    /** BUILD 22 — true only when a real vendor (`EMAIL_PROVIDER=resend`) AND its credential are both configured; `InMemoryEmailSender` (no real vendor) is always `false`. */
+    email: boolean;
   }>;
   /**
    * BUILD 21 Phase 15 (Observability) — used by `routes.ts`'s generation path
@@ -154,11 +157,16 @@ export function createAppContext(
     assetUrlSigningSecret?: string | undefined;
     registrationSecret?: string | undefined;
     cookieSecure?: boolean | undefined;
-    /** Defaults to `InMemoryEmailSender` — see its own doc comment; a real vendor wires a real `EmailSender` in here once chosen. */
+    /** Defaults to a real vendor when `emailProvider`+its credential are set, else `InMemoryEmailSender`. Supplying this directly always wins (tests do, to inject a spy/fake). */
     emailSender?: EmailSender | undefined;
     passwordResetTokenTtlMs?: number | undefined;
     /** BUILD 21 — defaults to `createConsoleLogger()`; tests override this to assert on emitted log content. */
     logger?: Logger | undefined;
+    /** BUILD 22 — real email vendor selection; see `env.ts`'s `EMAIL_PROVIDER`/`EMAIL_FROM`/`EMAIL_REPLY_TO`/`RESEND_API_KEY`. */
+    emailProvider?: 'resend' | undefined;
+    emailFrom?: string | undefined;
+    emailReplyTo?: string | undefined;
+    resendApiKey?: string | undefined;
   } = {},
 ): AppContext {
   const db = new SqliteDatabase(config.dbPath ?? ':memory:');
@@ -199,7 +207,15 @@ export function createAppContext(
     authRateLimiter: createInMemoryRateLimiter(AUTH_ROUTE_RATE_LIMIT),
     identityProvider: createLocalIdentityProvider({ userRepository, sessionRepository }),
     passwordResetTokenRepository: new SqlitePasswordResetTokenRepository(db),
-    emailSender: config.emailSender ?? new InMemoryEmailSender(),
+    emailSender:
+      config.emailSender ??
+      (config.emailProvider === 'resend'
+        ? createResendEmailSender({
+            apiKey: config.resendApiKey,
+            from: config.emailFrom ?? '',
+            ...(config.emailReplyTo ? { replyTo: config.emailReplyTo } : {}),
+          })
+        : new InMemoryEmailSender()),
     passwordResetRateLimiter: createInMemoryRateLimiter(PASSWORD_RESET_RATE_LIMIT),
     passwordResetTokenTtlMs: config.passwordResetTokenTtlMs ?? DEFAULT_RESET_TOKEN_TTL_MS,
     providerConfiguration: {
@@ -207,6 +223,7 @@ export function createAppContext(
       nanoBanana: Boolean(config.nanoBananaApiKey),
       chatgptImage: Boolean(config.chatgptImageApiKey),
       veo: Boolean(config.veoApiKey),
+      email: config.emailProvider === 'resend' && Boolean(config.resendApiKey),
     },
     logger: config.logger ?? createConsoleLogger(),
   };

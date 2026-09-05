@@ -82,6 +82,20 @@ const serverEnvSchema = z.object({
     .optional()
     .default('false')
     .transform((v) => v === 'true'),
+
+  // BUILD 22 (Real Email Vendor Integration) — real transactional email
+  // (password reset today). `EMAIL_PROVIDER` unset (the default) means no
+  // real vendor is wired: `EmailSender` stays `InMemoryEmailSender`
+  // (docs/03 §13, same "concrete engine deferred" pattern BUILD 18
+  // established for storage) — email "delivery" only ever records what
+  // would have been sent, in-process, and no secret is required to start.
+  // Setting it to `resend` opts into the one real vendor implemented so far
+  // (`resend-email-sender.ts`) and requires `RESEND_API_KEY`/`EMAIL_FROM`
+  // (enforced below) — a real vendor decision, not fabricated.
+  EMAIL_PROVIDER: z.literal('resend').optional(),
+  EMAIL_FROM: z.string().trim().email().optional(),
+  EMAIL_REPLY_TO: z.string().trim().email().optional(),
+  RESEND_API_KEY: z.string().optional(),
 }).superRefine((data, ctx) => {
   /**
    * BUILD 19 Phase 5 (Production Environment Validation) — "fail fast when
@@ -103,6 +117,29 @@ const serverEnvSchema = z.object({
       message: 'ASSET_URL_SIGNING_SECRET is required when TRUST_HTTPS=true — asset URLs must be signed once this deployment is trusted to be behind real HTTPS.',
     });
   }
+
+  /**
+   * BUILD 22 — "Missing required production credentials must be detected"
+   * / "Production configuration must not silently fall back to fake
+   * credentials." An operator explicitly declaring `EMAIL_PROVIDER=resend`
+   * has stated real email delivery is required; refuse to start rather than
+   * silently keep using `InMemoryEmailSender` (which never delivers
+   * anything) in what the operator declared a real-email deployment.
+   */
+  if (data.EMAIL_PROVIDER === 'resend' && !data.RESEND_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['RESEND_API_KEY'],
+      message: 'RESEND_API_KEY is required when EMAIL_PROVIDER=resend.',
+    });
+  }
+  if (data.EMAIL_PROVIDER === 'resend' && !data.EMAIL_FROM) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['EMAIL_FROM'],
+      message: 'EMAIL_FROM is required when EMAIL_PROVIDER=resend — Resend requires a verified sender identity.',
+    });
+  }
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -120,6 +157,7 @@ export const SECRET_ENV_KEYS: readonly (keyof ServerEnv)[] = [
   'ASSET_STORE_SECRET_KEY',
   'ASSET_URL_SIGNING_SECRET',
   'REGISTRATION_SECRET',
+  'RESEND_API_KEY',
 ];
 
 /**

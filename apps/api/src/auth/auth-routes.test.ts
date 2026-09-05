@@ -279,6 +279,37 @@ describe('apps/api auth routes (RELEASE 02 Security & Production Access Hardenin
       expect(emailSender.sent).toHaveLength(1); // only the known address actually got one
     });
 
+    it('BUILD 22: a real email vendor failure never changes the response — that would itself leak account existence', async () => {
+      // A real vendor (unlike InMemoryEmailSender) can genuinely throw (auth
+      // failure, rate limit, timeout). Since send() is only ever called for
+      // a KNOWN account, an unhandled throw reaching the client here would
+      // be a real enumeration side-channel: "this request errored
+      // differently" would mean "this account exists."
+      const failingEmailSender = {
+        send: async () => {
+          throw new Error('simulated vendor outage');
+        },
+      };
+      const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET, emailSender: failingEmailSender });
+      await start(context);
+      await registerTestUser(baseUrl, 'known-with-failing-vendor@example.com');
+
+      const knownRes = await fetch(`${baseUrl}/auth/password-reset/request`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'known-with-failing-vendor@example.com' }),
+      });
+      const unknownRes = await fetch(`${baseUrl}/auth/password-reset/request`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'still-nobody-real@example.com' }),
+      });
+
+      expect(knownRes.status).toBe(202);
+      expect(unknownRes.status).toBe(202);
+      expect(await knownRes.json()).toEqual(await unknownRes.json());
+    });
+
     it('rejects an unknown reset token with a generic error, never revealing why', async () => {
       await startWithEmailSender();
       const res = await fetch(`${baseUrl}/auth/password-reset/confirm`, {

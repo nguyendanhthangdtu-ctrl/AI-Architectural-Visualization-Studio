@@ -51,6 +51,36 @@ describe('parseServerEnv', () => {
   it('does not require ASSET_URL_SIGNING_SECRET when TRUST_HTTPS is false (the default)', () => {
     expect(() => parseServerEnv({})).not.toThrow();
   });
+
+  it('BUILD 22: succeeds with no EMAIL_PROVIDER set — dev/local mode never requires an email credential', () => {
+    expect(() => parseServerEnv({})).not.toThrow();
+    expect(parseServerEnv({}).EMAIL_PROVIDER).toBeUndefined();
+  });
+
+  it('BUILD 22: rejects an unsupported EMAIL_PROVIDER value rather than silently accepting an unimplemented vendor', () => {
+    expect(() => parseServerEnv({ EMAIL_PROVIDER: 'sendgrid' })).toThrow();
+  });
+
+  it('BUILD 22: fails fast when EMAIL_PROVIDER=resend but RESEND_API_KEY is missing', () => {
+    expect(() => parseServerEnv({ EMAIL_PROVIDER: 'resend', EMAIL_FROM: 'noreply@example.com' })).toThrow(/RESEND_API_KEY/);
+  });
+
+  it('BUILD 22: fails fast when EMAIL_PROVIDER=resend but EMAIL_FROM is missing', () => {
+    expect(() => parseServerEnv({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'a-real-key' })).toThrow(/EMAIL_FROM/);
+  });
+
+  it('BUILD 22: succeeds when EMAIL_PROVIDER=resend with both RESEND_API_KEY and EMAIL_FROM set', () => {
+    expect(() => parseServerEnv({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'a-real-key', EMAIL_FROM: 'noreply@example.com' })).not.toThrow();
+  });
+
+  it('BUILD 22: rejects a malformed EMAIL_FROM/EMAIL_REPLY_TO address', () => {
+    expect(() => parseServerEnv({ EMAIL_FROM: 'not-an-email' })).toThrow();
+    expect(() => parseServerEnv({ EMAIL_REPLY_TO: 'not-an-email' })).toThrow();
+  });
+
+  it('BUILD 22: lists RESEND_API_KEY as a secret to redact from logs', () => {
+    expect(SECRET_ENV_KEYS).toEqual(expect.arrayContaining(['RESEND_API_KEY']));
+  });
 });
 
 describe('parsePublicEnv', () => {

@@ -39,14 +39,30 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
     const res = await fetch(`http://127.0.0.1:${port}/ready`);
     const body = (await res.json()) as {
       status: string;
-      providers: { gemini: { configured: boolean }; nanoBanana: { configured: boolean }; chatgptImage: { configured: boolean }; veo: { configured: boolean } };
+      providers: {
+        gemini: { configured: boolean };
+        nanoBanana: { configured: boolean };
+        chatgptImage: { configured: boolean };
+        veo: { configured: boolean };
+        email: { configured: boolean };
+      };
     };
     expect(body.providers.gemini.configured).toBe(true);
     expect(body.providers.nanoBanana.configured).toBe(false);
     expect(body.providers.chatgptImage.configured).toBe(false);
     expect(body.providers.veo.configured).toBe(false);
+    expect(body.providers.email.configured).toBe(false); // no EMAIL_PROVIDER set — InMemoryEmailSender, never "configured"
     // no provider being unconfigured ever flips overall readiness — this deployment can still serve auth/asset/DB traffic
     expect(body.status).toBe('ready');
+  });
+
+  it('BUILD 22: reports email as configured only when a real vendor AND its credential are both set', async () => {
+    server = createApp(createAppContext({ emailProvider: 'resend', resendApiKey: 'a-real-resend-key', emailFrom: 'noreply@example.com' }));
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/ready`);
+    const body = (await res.json()) as { providers: { email: { configured: boolean } } };
+    expect(body.providers.email.configured).toBe(true);
   });
 
   it('never leaks a stack trace, a file path, or a secret value in its response', async () => {
@@ -54,6 +70,9 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
       createAppContext({
         assetUrlSigningSecret: 'a-real-secret-should-never-appear',
         geminiApiKey: 'a-real-gemini-key-should-never-appear',
+        emailProvider: 'resend',
+        resendApiKey: 'a-real-resend-key-should-never-appear',
+        emailFrom: 'noreply@example.com',
       }),
     );
     await new Promise<void>((resolve) => server!.listen(0, resolve));
@@ -62,6 +81,7 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
     const raw = await res.text();
     expect(raw).not.toContain('a-real-secret-should-never-appear');
     expect(raw).not.toContain('a-real-gemini-key-should-never-appear');
+    expect(raw).not.toContain('a-real-resend-key-should-never-appear');
     expect(raw).not.toContain('stack');
   });
 

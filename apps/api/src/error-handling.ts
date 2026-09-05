@@ -37,6 +37,7 @@ const HTTP_STATUS_BY_CODE: Readonly<Record<string, number>> = {
   INVALID_OR_EXPIRED_RESET_TOKEN: 400, // BUILD 19 Account Recovery — never says which (missing/expired/reused)
   GENERATION_IN_PROGRESS: 409, // BUILD 21 — a concurrent request with the same Idempotency-Key is still mid-flight
   GENERATION_OUTPUT_INVALID: 502, // BUILD 21 — provider returned something that isn't a real, decodable image; not the caller's fault
+  EMAIL_PROVIDER_ERROR: 502, // BUILD 22 — apps/api acting as gateway to an upstream (Resend) that failed
 };
 
 export function toErrorEnvelope(error: unknown): { httpStatus: number; envelope: ErrorEnvelope } {

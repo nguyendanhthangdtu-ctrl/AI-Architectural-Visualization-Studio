@@ -24,9 +24,16 @@ holds — an empty environment starts cleanly). What each one unlocks:
 | `TRUST_HTTPS` | `true`/`false` — gates cookie `Secure` + HSTS | Defaults `false`; **setting `true` without `ASSET_URL_SIGNING_SECRET` refuses to start** (BUILD 19 fail-fast rule) |
 | `API_PORT` | Listen port | Defaults `8080` |
 | `RUN_LIVE_PROVIDER_SMOKE_TEST` | Opt-in live provider test (see §7) | Live suite skips |
+| `EMAIL_PROVIDER` | `resend` — real email vendor (BUILD 22) | Unset = `InMemoryEmailSender`, never delivers |
+| `EMAIL_FROM` | Required when `EMAIL_PROVIDER=resend` | Server refuses to start without it (fail-fast) |
+| `EMAIL_REPLY_TO` | Optional default Reply-To | No Reply-To header sent |
+| `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` | Server refuses to start without it (fail-fast) |
+| `RUN_LIVE_EMAIL_SMOKE_TEST` | Opt-in live email test (BUILD 22) | Live suite skips |
 
-No email-vendor variable exists yet — `EmailSender` has only `InMemoryEmailSender`
-(BUILD 19). Wiring a real vendor is unstarted; see the final report's blocker list.
+**BUILD 22 update**: a real email vendor (Resend) is now implemented — see
+`docs/BUILD_22_EMAIL_INTEGRATION.md` for the architecture and `RUN_LIVE_EMAIL_SMOKE_TEST`
+below for how to verify it live. Unset `EMAIL_PROVIDER` keeps the exact BUILD 19 behavior
+(`InMemoryEmailSender`, never delivers anything).
 
 ## 2. Configuring secrets safely
 
@@ -76,21 +83,22 @@ curl -s http://localhost:8080/ready
     "gemini": { "configured": true },
     "nanoBanana": { "configured": true },
     "chatgptImage": { "configured": false },
-    "veo": { "configured": false }
+    "veo": { "configured": false },
+    "email": { "configured": false }
   }
 }
 ```
 
-`status` reflects ONLY the database and asset store — a missing AI provider key never flips
-overall readiness to `not_ready` (a deployment can legitimately serve auth/asset traffic
-before an AI key is added). `providers.*.configured` means **a key is present**, nothing
-more — it is never proof that provider has been verified against a real request. That
-evidence only ever comes from §7 below actually succeeding.
+`status` reflects ONLY the database and asset store — a missing AI provider or email vendor
+key never flips overall readiness to `not_ready` (a deployment can legitimately serve
+auth/asset traffic before an AI/email key is added). `providers.*.configured` means **a key
+is present**, nothing more — it is never proof that provider has been verified against a real
+request. That evidence only ever comes from §7 (AI) or §8 (email) below actually succeeding.
 
 ## 6. Running tests
 
 ```bash
-npx vitest run          # unit + integration + security, ~527 tests, no credentials needed
+npx vitest run          # unit + integration + security, ~559 tests, no credentials needed
 npx tsc -b --force       # typecheck, whole workspace
 npm run lint             # eslint, whole workspace
 npm run build            # production build (tsc + vite)
@@ -114,12 +122,27 @@ RUN_LIVE_PROVIDER_SMOKE_TEST=true GEMINI_API_KEY=<real key> \
 - **A PASS here is the only evidence that changes a provider's status from
   "configured" to "actually working."** Nothing else does.
 
-## 8. Testing email (once a real vendor is wired)
+## 8. Testing email
 
-Not applicable yet — no real vendor is wired (`InMemoryEmailSender` only). Once one is:
-configure its credentials the same way as an AI provider (server-side env var, never
-committed), then run its own opt-in live test the same way as §7, sending to a real
-controlled test recipient you configure, never a live user's address.
+**BUILD 22**: a real vendor (Resend) is now implemented. Set `EMAIL_PROVIDER=resend`,
+`RESEND_API_KEY`, and `EMAIL_FROM` (a real, verified sender identity — configure one at
+https://resend.com/docs/dashboard/domains/introduction) to enable it; leave `EMAIL_PROVIDER`
+unset to keep the exact BUILD 19 behavior (`InMemoryEmailSender`, never delivers).
+
+To verify it live — same opt-in gating pattern as §7, needs a real credential AND a real,
+controlled test recipient (never a live user's address):
+
+```bash
+RUN_LIVE_EMAIL_SMOKE_TEST=true RESEND_API_KEY=<real key> EMAIL_FROM=you@yourdomain.com EMAIL_TEST_RECIPIENT=you+test@yourdomain.com \
+  npx vitest run apps/api/src/live-email-smoke.test.ts
+```
+
+- Without `RUN_LIVE_EMAIL_SMOKE_TEST=true`, or missing any of the three other variables: the
+  whole suite is skipped, zero network calls.
+- Sends exactly one real, controlled test email and prints the vendor's own message id
+  (safe — never a secret) on success.
+- **A PASS here is the only evidence that changes email's status from "configured" to
+  "actually working."** Nothing else does — not `RESEND_API_KEY` merely being set.
 
 ## 9. Verifying asset retrieval
 
@@ -172,15 +195,19 @@ No database migration, no schema change, and no env var removal is required eith
 2. Update your secret manager/`.env` — never edit it in place in a way that gets logged.
 3. Restart the process (env vars are read once at `parseServerEnv()` time, not hot-reloaded).
 4. Confirm with `GET /ready` that `providers.<name>.configured` is `true`.
-5. Run §7's live smoke test once to confirm the NEW key actually works before relying on it —
-   "configured" is not "verified" (see §5).
+5. Run §7's (AI) or §8's (email) live smoke test once to confirm the NEW key actually works
+   before relying on it — "configured" is not "verified" (see §5).
 6. Revoke the OLD key at the provider console once the new one is confirmed working.
+7. To remove a credential entirely (e.g. taking a deployment back to dev-only email): unset
+   `EMAIL_PROVIDER`/`RESEND_API_KEY` in your secret manager, restart, and confirm `GET /ready`
+   now reports `providers.email.configured: false` — the app falls back to
+   `InMemoryEmailSender` cleanly, never a broken state.
 
 ## 15. What must never be committed
 
 - `.env` (already `.gitignore`d — verify with `git check-ignore -v .env` before any commit).
-- Any real API key, `REGISTRATION_SECRET`, or `ASSET_URL_SIGNING_SECRET` value, anywhere,
-  including in a commit message, a test fixture, or a doc example.
+- Any real API key, `REGISTRATION_SECRET`, `ASSET_URL_SIGNING_SECRET`, or `RESEND_API_KEY`
+  value, anywhere, including in a commit message, a test fixture, or a doc example.
 - The generated `data/` directory (SQLite file + local-disk assets) — already `.gitignore`d
   (`/data/`, `**/data/`, `*.sqlite3*`, `*.db*`).
 - Any real user-uploaded image or real generated output — these belong only in the

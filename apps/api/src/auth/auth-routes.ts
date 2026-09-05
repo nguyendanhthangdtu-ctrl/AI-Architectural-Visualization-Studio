@@ -163,22 +163,47 @@ export async function handleRequestPasswordReset(req: IncomingMessage, res: Serv
   if (user) {
     const rawToken = generateResetToken();
     const now = new Date();
+    const tokenId = hashResetToken(rawToken);
     await context.passwordResetTokenRepository.create({
-      id: hashResetToken(rawToken),
+      id: tokenId,
       userId: user.id,
       createdAt: now.toISOString() as Timestamp,
       expiresAt: new Date(now.getTime() + context.passwordResetTokenTtlMs).toISOString() as Timestamp,
       usedAt: null,
     });
-    await context.emailSender.send({
-      to: user.email,
-      subject: 'Reset your password',
-      body: [
-        'A password reset was requested for your account.',
-        `Reset token (expires in 1 hour, single use): ${rawToken}`,
-        "If you didn't request this, you can safely ignore this email.",
-      ].join('\n'),
-    });
+
+    // BUILD 22 — a real vendor can genuinely fail (auth, rate limit, timeout)
+    // where `InMemoryEmailSender` never could. That failure must never
+    // change this endpoint's response: `emailSender.send()` is only ever
+    // called for a KNOWN account (never for an unknown one, a few lines
+    // above), so letting a send failure escape as an error response here
+    // would itself be an enumeration side-channel — "this request failed
+    // differently" would mean "this account exists." Log it (safe,
+    // structured, no secret/token/body) and still answer with the exact
+    // same generic response either way.
+    const sendStartedAt = Date.now();
+    try {
+      const sendResult = await context.emailSender.send({
+        to: user.email,
+        subject: 'Reset your password',
+        body: [
+          'A password reset was requested for your account.',
+          `Reset token (expires in 1 hour, single use): ${rawToken}`,
+          "If you didn't request this, you can safely ignore this email.",
+        ].join('\n'),
+        idempotencyKey: tokenId,
+      });
+      context.logger.info('Password reset email attempt completed', {
+        latencyMs: Date.now() - sendStartedAt,
+        outcome: sendResult.status,
+      });
+    } catch (error) {
+      context.logger.error('Password reset email attempt failed', {
+        latencyMs: Date.now() - sendStartedAt,
+        code: error instanceof DomainError ? error.code : 'INTERNAL_ERROR',
+        providerCode: error instanceof DomainError ? error.providerCode : undefined,
+      });
+    }
   }
 
   sendJson(res, 202, GENERIC_RESET_REQUESTED_RESPONSE);
