@@ -30,6 +30,26 @@ describe('UploadDropzone', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('File is too large.');
   });
 
+  it('BUILD 28 FIX: keeps the dropzone/file input usable alongside the error — a failed upload must never be a permanent dead end', () => {
+    const onFilesSelected = vi.fn();
+    render(
+      <UploadDropzone
+        status="error"
+        error={{ code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Unsupported content type.', retryable: false }}
+        onFilesSelected={onFilesSelected}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('Unsupported content type.');
+    // The dropzone itself (and its real file input) must still be present and interactive.
+    const zone = screen.getByRole('button', { name: /drop a viewport image/i });
+    expect(zone).toHaveAttribute('tabIndex', '0');
+    const input = zone.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).not.toBeDisabled();
+    const file = new File(['x'], 'retry.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onFilesSelected).toHaveBeenCalledTimes(1);
+  });
+
   it('is disabled and non-focusable when disabled', () => {
     render(<UploadDropzone disabled onFilesSelected={() => {}} />);
     const zone = screen.getByRole('button', { name: /drop a viewport image/i });

@@ -119,6 +119,44 @@ describe('ModuleWorkspace — BUILD 13 real Render action', () => {
       expect(screen.getByRole('button', { name: 'Copy Image URL' })).toBeInTheDocument();
     });
 
+    it('BUILD 28 FIX: clears a stale QC result from a previous generation once a new render succeeds', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            jobId: 'job-2',
+            generationId: 'gen-2',
+            versionId: 'v2',
+            project: { ...PROJECT, currentVersionId: 'v2' },
+            generation: { id: 'gen-2', status: 'succeeded', provider: 'nano-banana', outputAssets: ['out-2'] },
+            outputAssetUrls: ['/assets/out-2'],
+          },
+          { status: 201 },
+        ),
+      );
+
+      const store = renderWithState({
+        currentProject: PROJECT,
+        sourceImage: { assetId: 'a1', url: '/assets/a1' },
+        scenario: SCENARIO,
+        promptDraft: 'a modern villa at golden hour',
+        latestGenerationId: 'gen-1', // a PREVIOUS generation this stale QC result belongs to
+        qcState: {
+          decision: 'pass',
+          scores: { architectureScore: 1, cameraScore: 1, materialScore: 1, lightingScore: 1, objectConsistencyScore: 1, photorealismScore: 1 },
+          issues: [],
+          correctionInstruction: null,
+        },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' }));
+
+      await waitFor(() => expect(screen.getByRole('img', { name: 'Generated photograph' })).toBeInTheDocument());
+
+      expect(store.getState().qcState).toBeNull();
+      expect(screen.queryByText('PASS')).not.toBeInTheDocument();
+    });
+
     it('shows the real error envelope, not a fake image, when generation fails', async () => {
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       fetchMock.mockResolvedValueOnce(

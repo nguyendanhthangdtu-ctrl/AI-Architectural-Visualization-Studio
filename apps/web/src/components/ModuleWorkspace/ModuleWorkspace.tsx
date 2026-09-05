@@ -63,6 +63,13 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
         latestGenerationOutputUrls: result.outputAssetUrls,
         latestGenerationId: result.generationId,
         latestOutputAssetId: result.generation.outputAssets[0] ?? null,
+        // BUILD 28 FIX — a real defect found via live browser QA: a fresh,
+        // never-verified render kept displaying the PREVIOUS generation's QC
+        // result (decision/scores), falsely implying the new output had
+        // already passed/failed QC. QC is per-generation (docs/15) — a new
+        // generation always starts with no QC verdict until Run QC is
+        // explicitly run against it again.
+        qcState: null,
         status: 'ready',
       });
       setRenderStatus('idle');

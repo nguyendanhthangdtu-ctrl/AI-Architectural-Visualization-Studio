@@ -68,7 +68,7 @@ function configuredSuffix(renderCore: string, providerConfiguration: ReadinessPr
   // Flow tracks no real credential at all, see app-context.ts) — this never actually
   // reaches that case today since Google Flow is excluded from AI_IMAGE_MODEL_OPTIONS,
   // but the lookup stays defensive rather than assuming every configKey resolves.
-  const check = (providerConfiguration as Record<string, { configured: boolean } | undefined>)[model.configKey];
+  const check = (providerConfiguration as unknown as Record<string, { configured: boolean } | undefined>)[model.configKey];
   return check?.configured === false ? ' — Not configured' : '';
 }
 

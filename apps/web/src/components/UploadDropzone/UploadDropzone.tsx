@@ -48,50 +48,60 @@ export function UploadDropzone({
     if (event.dataTransfer.files.length > 0) onFilesSelected(event.dataTransfer.files);
   };
 
-  if (status === 'error' && error) {
-    return <ErrorState error={error} />;
-  }
-
   return (
-    <div
-      className={styles.root}
-      data-dragging={dragging}
-      data-disabled={disabled}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      aria-describedby={`${inputId}-hint`}
-      onClick={openPicker}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openPicker();
-        }
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!disabled) setDragging(true);
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-    >
-      <label htmlFor={inputId} className={styles.title}>
-        {status === 'loading' ? loadingLabel : label}
-      </label>
-      <p id={`${inputId}-hint`} className={styles.hint}>
-        {hint}
-      </p>
-      <input
-        ref={inputRef}
-        id={inputId}
-        className={styles.input}
-        type="file"
-        accept={accept}
-        disabled={disabled}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) onFilesSelected(e.target.files);
+    <>
+      <div
+        className={styles.root}
+        data-dragging={dragging}
+        data-disabled={disabled}
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        aria-describedby={`${inputId}-hint`}
+        onClick={openPicker}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openPicker();
+          }
         }}
-      />
-    </div>
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!disabled) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+      >
+        <label htmlFor={inputId} className={styles.title}>
+          {status === 'loading' ? loadingLabel : label}
+        </label>
+        <p id={`${inputId}-hint`} className={styles.hint}>
+          {hint}
+        </p>
+        <input
+          ref={inputRef}
+          id={inputId}
+          className={styles.input}
+          type="file"
+          accept={accept}
+          disabled={disabled}
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) onFilesSelected(e.target.files);
+          }}
+        />
+      </div>
+      {/*
+       * BUILD 28 FIX — a real defect found via live browser QA: this
+       * previously returned ONLY <ErrorState>, replacing the dropzone/file
+       * input entirely on a failed upload (wrong file type, too large,
+       * etc.). With no retry button wired here (no onRetry prop passed) and
+       * no other path back to a non-error status, the control became a
+       * permanent dead end — the only way to attempt another upload was a
+       * full page reload. The dropzone now stays rendered (and stays
+       * interactive) alongside the error, so picking a different, valid
+       * file immediately retries.
+       */}
+      {status === 'error' && error ? <ErrorState error={error} /> : null}
+    </>
   );
 }
