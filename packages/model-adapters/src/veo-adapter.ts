@@ -1,4 +1,7 @@
-import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
+import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
+
+/** Video downloads are real files, not a small JSON response — a longer timeout than the default 60s avoids classifying a merely-slow-but-healthy download as a hang. */
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 180_000;
 import type { VideoGenerationAdapter } from './video-adapter.js';
 import type {
   VideoAdapterCapabilities,
@@ -114,11 +117,19 @@ export function createVeoAdapter(config: VeoAdapterConfig): VideoGenerationAdapt
         },
       };
 
-      const res = await fetchFn(`${GEMINI_BASE_URL}/models/${model}:predictLongRunning`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(requestBody),
-      });
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(fetchFn, `${GEMINI_BASE_URL}/models/${model}:predictLongRunning`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify(requestBody),
+        });
+      } catch (error) {
+        if (error instanceof ProviderTimeoutError) {
+          throw new DomainError({ code: 'VEO_PROVIDER_ERROR', message: `Veo API request timed out: ${error.message}`, retryable: true });
+        }
+        throw error;
+      }
 
       if (!res.ok) {
         const bodyText = await res.text().catch(() => '');
@@ -139,9 +150,17 @@ export function createVeoAdapter(config: VeoAdapterConfig): VideoGenerationAdapt
     async pollStatus(operation: VideoOperationRef): Promise<VideoPollResult> {
       const apiKey = requireApiKey();
 
-      const res = await fetchFn(`${GEMINI_BASE_URL}/${operation.operationName}`, {
-        headers: { 'x-goog-api-key': apiKey },
-      });
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(fetchFn, `${GEMINI_BASE_URL}/${operation.operationName}`, {
+          headers: { 'x-goog-api-key': apiKey },
+        });
+      } catch (error) {
+        if (error instanceof ProviderTimeoutError) {
+          throw new DomainError({ code: 'VEO_PROVIDER_ERROR', message: `Veo API request timed out: ${error.message}`, retryable: true });
+        }
+        throw error;
+      }
       if (!res.ok) {
         const bodyText = await res.text().catch(() => '');
         throw new DomainError(classifyVeoError(res.status, bodyText || res.statusText));
@@ -171,7 +190,15 @@ export function createVeoAdapter(config: VeoAdapterConfig): VideoGenerationAdapt
         };
       }
 
-      const videoRes = await fetchFn(videoUri, { headers: { 'x-goog-api-key': apiKey } });
+      let videoRes: Response;
+      try {
+        videoRes = await fetchWithTimeout(fetchFn, videoUri, { headers: { 'x-goog-api-key': apiKey } }, VIDEO_DOWNLOAD_TIMEOUT_MS);
+      } catch (error) {
+        if (error instanceof ProviderTimeoutError) {
+          throw new DomainError({ code: 'VEO_PROVIDER_ERROR', message: `Veo video download timed out: ${error.message}`, retryable: true });
+        }
+        throw error;
+      }
       if (!videoRes.ok) {
         throw new DomainError(classifyVeoError(videoRes.status, `Could not download the generated video from ${videoUri}.`));
       }

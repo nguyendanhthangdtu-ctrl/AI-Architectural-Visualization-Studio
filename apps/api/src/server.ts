@@ -4,9 +4,17 @@ import { createConsoleLogger, createInMemoryMetrics, DomainError, parseServerEnv
 import { sendError } from './error-handling.js';
 import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
 import { applySecurityHeaders } from './security-headers.js';
+import { handleReadiness } from './readiness.js';
 import { enforceRateLimit } from './rate-limit-middleware.js';
 import { createAppContext, type AppContext } from './app-context.js';
-import { handleLogin, handleLogout, handleMe, handleRegister } from './auth/auth-routes.js';
+import {
+  handleConfirmPasswordReset,
+  handleLogin,
+  handleLogout,
+  handleMe,
+  handleRegister,
+  handleRequestPasswordReset,
+} from './auth/auth-routes.js';
 import { requireAuth } from './auth/session.js';
 import {
   handleCreateProject,
@@ -86,6 +94,11 @@ export function createApp(
           return;
         }
 
+        if (req.method === 'GET' && path === '/ready') {
+          await handleReadiness(res, context);
+          return;
+        }
+
         if (req.method === 'POST' && path === '/auth/register') {
           enforceRateLimit(context.authRateLimiter, req.socket.remoteAddress ?? 'unknown');
           await handleRegister(req, res, context);
@@ -95,6 +108,20 @@ export function createApp(
         if (req.method === 'POST' && path === '/auth/login') {
           enforceRateLimit(context.authRateLimiter, req.socket.remoteAddress ?? 'unknown');
           await handleLogin(req, res, context);
+          return;
+        }
+
+        // BUILD 19 (Account Recovery) — public: a caller requesting/confirming
+        // a reset is, by definition, not necessarily holding a valid session.
+        if (req.method === 'POST' && path === '/auth/password-reset/request') {
+          enforceRateLimit(context.passwordResetRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          await handleRequestPasswordReset(req, res, context);
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/auth/password-reset/confirm') {
+          enforceRateLimit(context.passwordResetRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          await handleConfirmPasswordReset(req, res, context);
           return;
         }
 

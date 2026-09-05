@@ -82,6 +82,27 @@ const serverEnvSchema = z.object({
     .optional()
     .default('false')
     .transform((v) => v === 'true'),
+}).superRefine((data, ctx) => {
+  /**
+   * BUILD 19 Phase 5 (Production Environment Validation) — "fail fast when
+   * mandatory production configuration is missing." `TRUST_HTTPS=true` is
+   * this app's one real signal "this is a production-shaped deployment"
+   * (docs/03 §11 — it's only ever set once a real reverse proxy exists); at
+   * that point, asset URLs staying unsigned/unauthenticated is a real
+   * confidentiality gap, not a cosmetic one, so this refuses to start rather
+   * than silently serving unsigned URLs in what the operator declared a
+   * trusted-HTTPS deployment. Every OTHER field stays optional here
+   * deliberately (docs/03 §13 — e.g. `REGISTRATION_SECRET` unset is a valid,
+   * intentional "registration permanently closed" choice, not a
+   * misconfiguration to block on).
+   */
+  if (data.TRUST_HTTPS && !data.ASSET_URL_SIGNING_SECRET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ASSET_URL_SIGNING_SECRET'],
+      message: 'ASSET_URL_SIGNING_SECRET is required when TRUST_HTTPS=true — asset URLs must be signed once this deployment is trusted to be behind real HTTPS.',
+    });
+  }
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

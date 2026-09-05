@@ -66,29 +66,21 @@ function unauthenticated(): DomainError {
 
 /**
  * The one real authorization boundary every protected route calls through —
- * never trusts a client-supplied user id (docs/16): the user comes only from
- * a session row this server itself created and can still find, looked up by
- * the opaque cookie value, nothing else. Deletes an expired session row on
- * the way out (real cleanup, not just a rejected request) rather than
- * leaving it to accumulate.
+ * never trusts a client-supplied user id (docs/16). Delegates the actual
+ * verification to `context.identityProvider` (BUILD 19 Phase 2) — this
+ * function only ever knows "read the cookie, ask the provider, reject if it
+ * says no"; it has no session-lookup logic of its own to keep in sync with a
+ * future managed-identity-provider swap.
  */
 export async function requireAuth(context: AppContext, req: IncomingMessage): Promise<AuthenticatedUser> {
   const cookies = parseCookies(req.headers.cookie);
   const sessionId = cookies[SESSION_COOKIE_NAME];
   if (!sessionId) throw unauthenticated();
 
-  const session = await context.sessionRepository.getById(sessionId);
-  if (!session) throw unauthenticated();
-
-  if (new Date(session.expiresAt).getTime() < Date.now()) {
-    await context.sessionRepository.deleteById(sessionId);
-    throw unauthenticated();
-  }
-
-  const user = await context.userRepository.getById(session.userId);
+  const user = await context.identityProvider.verifySession(sessionId);
   if (!user) throw unauthenticated();
 
-  return { id: user.id, email: user.email };
+  return user;
 }
 
 export function newSession(userId: Session['userId']): Session {

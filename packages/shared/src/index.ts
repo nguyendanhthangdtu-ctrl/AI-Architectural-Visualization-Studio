@@ -6,4 +6,5 @@ export * from './language.js';
 export * from './provider-error-sanitizer.js';
 export * from './rate-limiter.js';
 export * from './metrics.js';
+export * from './fetch-timeout.js';
 export { z } from 'zod';

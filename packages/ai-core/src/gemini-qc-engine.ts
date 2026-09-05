@@ -1,5 +1,5 @@
 import type { LockId } from '@avs/project-core';
-import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
+import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { AiQc, QCIssue, QCResult, QCScores, QcNormalizedRequestContext } from './qc.js';
 
 /**
@@ -234,11 +234,19 @@ export function createGeminiQcEngine(config: GeminiQcEngineConfig): AiQc {
         },
       };
 
-      const res = await fetchFn(GEMINI_INTERACTIONS_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
-        body: JSON.stringify(requestBody),
-      });
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(fetchFn, GEMINI_INTERACTIONS_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
+          body: JSON.stringify(requestBody),
+        });
+      } catch (error) {
+        if (error instanceof ProviderTimeoutError) {
+          throw new DomainError({ code: 'QC_PROVIDER_ERROR', message: `Gemini API request timed out: ${error.message}`, retryable: true });
+        }
+        throw error;
+      }
 
       if (!res.ok) {
         const bodyText = await res.text().catch(() => '');

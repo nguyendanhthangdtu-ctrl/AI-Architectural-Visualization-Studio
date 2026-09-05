@@ -1,6 +1,6 @@
 import type { ProjectModule } from '@avs/project-core';
 import { describeArchitectureModule, describeInteriorModule } from '@avs/project-core';
-import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
+import { DEFAULT_PROVIDER_TIMEOUT_MS, DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 import { LAYER_NAMES, structuredIntelligenceLayersSchema } from './structured-intelligence-schema.js';
 import type { SourceAssetRef, StructuredIntelligence, VisionAnalysisEngine } from './vision-analysis.js';
 
@@ -25,6 +25,8 @@ export interface GeminiVisionEngineConfig {
   model?: string;
   /** Injectable for testing — defaults to the global fetch. */
   fetchFn?: typeof fetch;
+  /** BUILD 19 Phase 3 — real request timeout (`@avs/shared`'s `fetchWithTimeout`); defaults to `DEFAULT_PROVIDER_TIMEOUT_MS` (60s). */
+  timeoutMs?: number;
 }
 
 function moduleVocabularyGuidance(module: ProjectModule): string {
@@ -222,6 +224,7 @@ function classifyGeminiError(status: number, message: string): DomainError {
 export function createGeminiVisionAnalysisEngine(config: GeminiVisionEngineConfig): VisionAnalysisEngine {
   const fetchFn = config.fetchFn ?? fetch;
   const model = config.model ?? DEFAULT_MODEL;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
 
   return {
     async analyze(sourceAsset: SourceAssetRef, module: ProjectModule): Promise<StructuredIntelligence> {
@@ -247,11 +250,24 @@ export function createGeminiVisionAnalysisEngine(config: GeminiVisionEngineConfi
         },
       };
 
-      const res = await fetchFn(GEMINI_INTERACTIONS_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
-        body: JSON.stringify(requestBody),
-      });
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(
+          fetchFn,
+          GEMINI_INTERACTIONS_URL,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
+            body: JSON.stringify(requestBody),
+          },
+          timeoutMs,
+        );
+      } catch (error) {
+        if (error instanceof ProviderTimeoutError) {
+          throw new DomainError({ code: 'VISION_PROVIDER_ERROR', message: `Gemini API request timed out: ${error.message}`, retryable: true });
+        }
+        throw error;
+      }
 
       if (!res.ok) {
         const bodyText = await res.text().catch(() => '');

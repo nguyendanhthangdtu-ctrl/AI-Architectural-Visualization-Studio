@@ -4,6 +4,7 @@ import { SqliteDatabase } from './sqlite-database.js';
 import {
   SqliteAnalysisRepository,
   SqliteAuditLogRepository,
+  SqlitePasswordResetTokenRepository,
   SqliteProjectRepository,
   SqliteSessionRepository,
   SqliteUserRepository,
@@ -162,6 +163,55 @@ describe('SqliteSessionRepository (RELEASE 02)', () => {
     await expect(repo.getById('sess-1')).resolves.toEqual(session);
     await repo.deleteById('sess-1');
     await expect(repo.getById('sess-1')).resolves.toBeNull();
+  });
+
+  it('deleteAllForUser (BUILD 19) revokes every session for one user without touching another user\'s', async () => {
+    const repo = new SqliteSessionRepository(freshDb());
+    await repo.create({ id: 'sess-1', userId: 'u1' as UserId, createdAt: 't' as Timestamp, expiresAt: 'later' as Timestamp });
+    await repo.create({ id: 'sess-2', userId: 'u1' as UserId, createdAt: 't' as Timestamp, expiresAt: 'later' as Timestamp });
+    await repo.create({ id: 'sess-3', userId: 'u2' as UserId, createdAt: 't' as Timestamp, expiresAt: 'later' as Timestamp });
+
+    await repo.deleteAllForUser('u1' as UserId);
+
+    await expect(repo.getById('sess-1')).resolves.toBeNull();
+    await expect(repo.getById('sess-2')).resolves.toBeNull();
+    await expect(repo.getById('sess-3')).resolves.not.toBeNull();
+  });
+});
+
+describe('SqliteUserRepository.updatePasswordHash (BUILD 19 Account Recovery)', () => {
+  it('persists a new password hash for real', async () => {
+    const repo = new SqliteUserRepository(freshDb());
+    await repo.create({ id: 'u1' as UserId, email: 'x@example.com', passwordHash: 'old-hash', createdAt: 't' as Timestamp });
+    await repo.updatePasswordHash('u1' as UserId, 'new-hash');
+    await expect(repo.getById('u1' as UserId)).resolves.toMatchObject({ passwordHash: 'new-hash' });
+  });
+
+  it('rejects updating an unknown user id', async () => {
+    const repo = new SqliteUserRepository(freshDb());
+    await expect(repo.updatePasswordHash('missing' as UserId, 'x')).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
+  });
+});
+
+describe('SqlitePasswordResetTokenRepository (BUILD 19 Account Recovery)', () => {
+  it('round-trips a token and supports real single-use marking', async () => {
+    const repo = new SqlitePasswordResetTokenRepository(freshDb());
+    const token = { id: 'hash-1', userId: 'u1' as UserId, createdAt: 't' as Timestamp, expiresAt: 'later' as Timestamp, usedAt: null };
+    await repo.create(token);
+    await expect(repo.getById('hash-1')).resolves.toEqual(token);
+
+    await repo.markUsed('hash-1', 'used-at');
+    await expect(repo.getById('hash-1')).resolves.toMatchObject({ usedAt: 'used-at' });
+  });
+
+  it('returns null for an unknown token hash', async () => {
+    const repo = new SqlitePasswordResetTokenRepository(freshDb());
+    await expect(repo.getById('missing')).resolves.toBeNull();
+  });
+
+  it('rejects marking an unknown token as used', async () => {
+    const repo = new SqlitePasswordResetTokenRepository(freshDb());
+    await expect(repo.markUsed('missing', 't')).rejects.toMatchObject({ code: 'RESET_TOKEN_NOT_FOUND' });
   });
 });
 

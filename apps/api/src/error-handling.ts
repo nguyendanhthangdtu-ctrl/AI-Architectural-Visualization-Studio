@@ -34,6 +34,7 @@ const HTTP_STATUS_BY_CODE: Readonly<Record<string, number>> = {
   REGISTRATION_DISABLED: 403, // RELEASE 02 — no REGISTRATION_SECRET configured on this deployment
   REGISTRATION_FORBIDDEN: 403, // RELEASE 02 — wrong registration secret
   EMAIL_ALREADY_REGISTERED: 409, // RELEASE 02
+  INVALID_OR_EXPIRED_RESET_TOKEN: 400, // BUILD 19 Account Recovery — never says which (missing/expired/reused)
 };
 
 export function toErrorEnvelope(error: unknown): { httpStatus: number; envelope: ErrorEnvelope } {

@@ -162,4 +162,18 @@ describe('createGeminiVisionAnalysisEngine', () => {
     const engine = createGeminiVisionAnalysisEngine({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch });
     await expect(engine.analyze(sourceAsset, 'architecture')).rejects.toMatchObject({ code: 'VISION_PROVIDER_ERROR' });
   });
+
+  it('BUILD 19 Phase 3: real request timeout — a hung upstream connection is rejected as a retryable VISION_PROVIDER_ERROR, not left open indefinitely', async () => {
+    const fetchFn = vi.fn().mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    const engine = createGeminiVisionAnalysisEngine({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, timeoutMs: 10 });
+    await expect(engine.analyze(sourceAsset, 'architecture')).rejects.toMatchObject({
+      code: 'VISION_PROVIDER_ERROR',
+      retryable: true,
+    });
+  });
 });

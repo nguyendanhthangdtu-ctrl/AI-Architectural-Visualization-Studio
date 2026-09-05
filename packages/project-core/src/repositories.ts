@@ -5,7 +5,7 @@ import type { LockId } from './lock.js';
 import type { EditCategory } from './edit-vocabulary.js';
 import type { CameraDNA, LightingDNA, MaterialDNA } from './dna.js';
 import type { VideoLockId, VideoMotionType } from './video-vocabulary.js';
-import type { Session, User } from './user.js';
+import type { PasswordResetToken, Session, User } from './user.js';
 
 /**
  * Storage-agnostic repository interfaces — docs/03_TECHNICAL_ARCHITECTURE.md
@@ -249,11 +249,26 @@ export interface UserRepository {
   create(user: User): Promise<User>;
   getById(id: UserId): Promise<User | null>;
   getByEmail(email: string): Promise<User | null>;
+  /** BUILD 19 (Account Recovery) — the one field a password reset ever changes; never a general-purpose profile update. */
+  updatePasswordHash(id: UserId, passwordHash: string): Promise<void>;
 }
 
-/** RELEASE 02 — real, revocable server-side sessions (see `Session`'s own doc comment, user.ts). */
+/**
+ * RELEASE 02 — real, revocable server-side sessions (see `Session`'s own doc
+ * comment, user.ts). `deleteAllForUser` (BUILD 19) is what makes a password
+ * reset actually revoke every existing session, not just the one the reset
+ * happened to arrive through.
+ */
 export interface SessionRepository {
   create(session: Session): Promise<Session>;
   getById(id: string): Promise<Session | null>;
   deleteById(id: string): Promise<void>;
+  deleteAllForUser(userId: UserId): Promise<void>;
+}
+
+/** BUILD 19 (Account Recovery) — see `PasswordResetToken`'s own doc comment, user.ts. */
+export interface PasswordResetTokenRepository {
+  create(token: PasswordResetToken): Promise<PasswordResetToken>;
+  getById(tokenHash: string): Promise<PasswordResetToken | null>;
+  markUsed(tokenHash: string, usedAt: string): Promise<void>;
 }

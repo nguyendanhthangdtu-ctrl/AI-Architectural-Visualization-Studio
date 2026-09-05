@@ -32,12 +32,24 @@ describe('parseServerEnv', () => {
 
   it('defaults TRUST_HTTPS to false, and parses "true"/"false" as real booleans (not JS truthiness)', () => {
     expect(parseServerEnv({}).TRUST_HTTPS).toBe(false);
-    expect(parseServerEnv({ TRUST_HTTPS: 'true' }).TRUST_HTTPS).toBe(true);
+    expect(parseServerEnv({ TRUST_HTTPS: 'true', ASSET_URL_SIGNING_SECRET: 'x' }).TRUST_HTTPS).toBe(true);
     expect(parseServerEnv({ TRUST_HTTPS: 'false' }).TRUST_HTTPS).toBe(false);
   });
 
   it('rejects a non-"true"/"false" TRUST_HTTPS value rather than silently coercing it', () => {
     expect(() => parseServerEnv({ TRUST_HTTPS: 'yes' })).toThrow();
+  });
+
+  it('BUILD 19 Phase 5: fails fast when TRUST_HTTPS=true but ASSET_URL_SIGNING_SECRET is missing', () => {
+    expect(() => parseServerEnv({ TRUST_HTTPS: 'true' })).toThrow(/ASSET_URL_SIGNING_SECRET/);
+  });
+
+  it('succeeds when TRUST_HTTPS=true and ASSET_URL_SIGNING_SECRET is set', () => {
+    expect(() => parseServerEnv({ TRUST_HTTPS: 'true', ASSET_URL_SIGNING_SECRET: 'a-real-secret' })).not.toThrow();
+  });
+
+  it('does not require ASSET_URL_SIGNING_SECRET when TRUST_HTTPS is false (the default)', () => {
+    expect(() => parseServerEnv({})).not.toThrow();
   });
 });
 

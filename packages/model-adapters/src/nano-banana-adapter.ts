@@ -1,4 +1,4 @@
-import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
+import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 import type {
   AdapterCapabilities,
@@ -62,11 +62,19 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
       response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: aspectRatio },
     };
 
-    const res = await fetchFn(GEMINI_INTERACTIONS_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
-      body: JSON.stringify(requestBody),
-    });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(fetchFn, GEMINI_INTERACTIONS_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
+        body: JSON.stringify(requestBody),
+      });
+    } catch (error) {
+      if (error instanceof ProviderTimeoutError) {
+        throw new DomainError({ code: 'NANO_BANANA_PROVIDER_ERROR', message: `Gemini API request timed out: ${error.message}`, retryable: true });
+      }
+      throw error;
+    }
 
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '');

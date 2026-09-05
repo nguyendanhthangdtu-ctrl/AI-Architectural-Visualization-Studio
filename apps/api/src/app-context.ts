@@ -7,6 +7,7 @@ import type {
   AuditLogRepository,
   EditRepository,
   GenerationRepository,
+  PasswordResetTokenRepository,
   ProjectRepository,
   ReferenceRepository,
   SessionRepository,
@@ -22,6 +23,7 @@ import {
   SqliteDatabase,
   SqliteEditRepository,
   SqliteGenerationRepository,
+  SqlitePasswordResetTokenRepository,
   SqliteProjectRepository,
   SqliteReferenceRepository,
   SqliteSessionRepository,
@@ -45,12 +47,18 @@ import {
 } from '@avs/model-adapters';
 import { InMemoryJobQueue, type JobQueue } from './job-queue.js';
 import { createAssetUrlSigner, type AssetUrlSigner } from './signed-asset-url.js';
+import { createLocalIdentityProvider, type IdentityProvider } from './auth/identity-provider.js';
+import { InMemoryEmailSender, type EmailSender } from './auth/email-sender.js';
+import { DEFAULT_RESET_TOKEN_TTL_MS } from './auth/auth-routes.js';
 
 /** docs/16 "Rate limit expensive AI endpoints" — applied to analysis/reference/generation/edit/view/video/QC/regenerate routes (server.ts). */
 export const AI_ROUTE_RATE_LIMIT = { maxRequests: 30, windowMs: 60_000 };
 
 /** RELEASE 02 — tighter limit on register/login specifically, to bound credential-guessing/account-creation abuse. */
 export const AUTH_ROUTE_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 };
+
+/** BUILD 19 (Account Recovery) — bounds password-reset-request abuse (both credential-stuffing and email-bombing a real user). */
+export const PASSWORD_RESET_RATE_LIMIT = { maxRequests: 5, windowMs: 60_000 };
 
 /**
  * Repository/engine instances the API routes depend on — docs/03 ADR-003.
@@ -86,6 +94,14 @@ export interface AppContext {
   /** Sets the session cookie's `Secure` attribute and gates `Strict-Transport-Security` — see env.ts's `TRUST_HTTPS`. */
   cookieSecure: boolean;
   authRateLimiter: RateLimiter;
+  /** BUILD 19 Phase 2 — the swappable "who does this session belong to" boundary; `requireAuth()` never looks up a session row directly. */
+  identityProvider: IdentityProvider;
+  /** BUILD 19 (Account Recovery). */
+  passwordResetTokenRepository: PasswordResetTokenRepository;
+  emailSender: EmailSender;
+  passwordResetRateLimiter: RateLimiter;
+  /** Defaults to `DEFAULT_RESET_TOKEN_TTL_MS` (1 hour, auth-routes.ts); overridable only so tests can exercise real expiry with a real, tiny delay instead of mocking time around a live HTTP server. */
+  passwordResetTokenTtlMs: number;
 }
 
 /**
@@ -116,10 +132,15 @@ export function createAppContext(
     assetUrlSigningSecret?: string | undefined;
     registrationSecret?: string | undefined;
     cookieSecure?: boolean | undefined;
+    /** Defaults to `InMemoryEmailSender` — see its own doc comment; a real vendor wires a real `EmailSender` in here once chosen. */
+    emailSender?: EmailSender | undefined;
+    passwordResetTokenTtlMs?: number | undefined;
   } = {},
 ): AppContext {
   const db = new SqliteDatabase(config.dbPath ?? ':memory:');
   const assetsDir = config.assetsDir ?? mkdtempSync(join(tmpdir(), 'avs-assets-'));
+  const userRepository = new SqliteUserRepository(db);
+  const sessionRepository = new SqliteSessionRepository(db);
 
   return {
     projectRepository: new SqliteProjectRepository(db),
@@ -147,10 +168,15 @@ export function createAppContext(
     auditLogRepository: new SqliteAuditLogRepository(db),
     assetUrlSigner: createAssetUrlSigner(config.assetUrlSigningSecret),
     rateLimiter: createInMemoryRateLimiter(AI_ROUTE_RATE_LIMIT),
-    userRepository: new SqliteUserRepository(db),
-    sessionRepository: new SqliteSessionRepository(db),
+    userRepository,
+    sessionRepository,
     registrationSecret: config.registrationSecret,
     cookieSecure: config.cookieSecure ?? false,
     authRateLimiter: createInMemoryRateLimiter(AUTH_ROUTE_RATE_LIMIT),
+    identityProvider: createLocalIdentityProvider({ userRepository, sessionRepository }),
+    passwordResetTokenRepository: new SqlitePasswordResetTokenRepository(db),
+    emailSender: config.emailSender ?? new InMemoryEmailSender(),
+    passwordResetRateLimiter: createInMemoryRateLimiter(PASSWORD_RESET_RATE_LIMIT),
+    passwordResetTokenTtlMs: config.passwordResetTokenTtlMs ?? DEFAULT_RESET_TOKEN_TTL_MS,
   };
 }

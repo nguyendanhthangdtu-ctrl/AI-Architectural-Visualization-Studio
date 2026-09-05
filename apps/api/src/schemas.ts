@@ -34,6 +34,25 @@ export const loginRequestSchema = z.object({
 
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
+/**
+ * BUILD 19 (Account Recovery). `requestPasswordResetRequestSchema` only
+ * validates shape (a real email-shaped string) — the route itself never
+ * reveals whether the address is actually registered (enumeration
+ * protection is a runtime-behavior guarantee, not a schema one).
+ */
+export const requestPasswordResetRequestSchema = z.object({
+  email: z.string().trim().min(1, 'email must not be empty').email('email must be a valid email address'),
+});
+
+export type RequestPasswordResetRequest = z.infer<typeof requestPasswordResetRequestSchema>;
+
+export const confirmPasswordResetRequestSchema = z.object({
+  token: z.string().trim().min(1, 'token must not be empty'),
+  newPassword: z.string().min(8, 'newPassword must be at least 8 characters'),
+});
+
+export type ConfirmPasswordResetRequest = z.infer<typeof confirmPasswordResetRequestSchema>;
+
 /** docs/01 MVP step 4 "Run 12-layer AI analysis" (BUILD 07). */
 export const runAnalysisRequestSchema = z.object({
   assetId: z.string().trim().min(1, 'assetId must not be empty'),

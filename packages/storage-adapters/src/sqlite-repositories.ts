@@ -10,6 +10,8 @@ import type {
   GenerationRecord,
   GenerationRepository,
   GenerationVersion,
+  PasswordResetToken,
+  PasswordResetTokenRepository,
   Project,
   ProjectRepository,
   ReferenceRecord,
@@ -44,6 +46,7 @@ const VIEWS_TABLE = 'view_records';
 const VIDEOS_TABLE = 'videos';
 const AUDIT_EVENTS_TABLE = 'audit_events';
 const SESSIONS_TABLE = 'sessions';
+const PASSWORD_RESET_TOKENS_TABLE = 'password_reset_tokens';
 
 export class SqliteProjectRepository implements ProjectRepository {
   constructor(private readonly db: SqliteDatabase) {
@@ -262,6 +265,15 @@ export class SqliteUserRepository implements UserRepository {
       | undefined;
     return row ? (JSON.parse(row.data) as User) : null;
   }
+
+  async updatePasswordHash(id: UserId, passwordHash: string): Promise<void> {
+    const user = await this.getById(id);
+    if (!user) {
+      throw new DomainError({ code: 'USER_NOT_FOUND', message: `No user with id ${id}`, retryable: false });
+    }
+    const updated: User = { ...user, passwordHash };
+    this.db.raw.prepare(`UPDATE users SET data = ? WHERE id = ?`).run(JSON.stringify(updated), id);
+  }
 }
 
 /** RELEASE 02 — real, revocable sessions; fits the generic id/project_id/data shape (`project_id` stays unused/null). */
@@ -281,6 +293,34 @@ export class SqliteSessionRepository implements SessionRepository {
 
   async deleteById(id: string): Promise<void> {
     this.db.deleteById(SESSIONS_TABLE, id);
+  }
+
+  async deleteAllForUser(userId: UserId): Promise<void> {
+    this.db.raw.prepare(`DELETE FROM ${SESSIONS_TABLE} WHERE json_extract(data, '$.userId') = ?`).run(userId);
+  }
+}
+
+/** BUILD 19 (Account Recovery) — fits the generic id/project_id/data shape (`project_id` stays unused/null, same as sessions). */
+export class SqlitePasswordResetTokenRepository implements PasswordResetTokenRepository {
+  constructor(private readonly db: SqliteDatabase) {
+    db.ensureTable(PASSWORD_RESET_TOKENS_TABLE);
+  }
+
+  async create(token: PasswordResetToken): Promise<PasswordResetToken> {
+    this.db.insert(PASSWORD_RESET_TOKENS_TABLE, token.id, null, token);
+    return token;
+  }
+
+  async getById(tokenHash: string): Promise<PasswordResetToken | null> {
+    return this.db.getById<PasswordResetToken>(PASSWORD_RESET_TOKENS_TABLE, tokenHash);
+  }
+
+  async markUsed(tokenHash: string, usedAt: string): Promise<void> {
+    const existing = await this.getById(tokenHash);
+    if (!existing) {
+      throw new DomainError({ code: 'RESET_TOKEN_NOT_FOUND', message: 'No password reset token found.', retryable: false });
+    }
+    this.db.upsert(PASSWORD_RESET_TOKENS_TABLE, tokenHash, null, { ...existing, usedAt });
   }
 }
 

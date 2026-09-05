@@ -32,3 +32,19 @@ export interface Session {
   createdAt: Timestamp;
   expiresAt: Timestamp;
 }
+
+/**
+ * BUILD 19 (Account Recovery) — a real, single-use, expiring password reset
+ * grant. `id` is the SHA-256 hash of the raw token (`apps/api/src/auth/
+ * reset-token.ts`), never the raw token itself — a compromised DB row alone
+ * can't be replayed as a working reset link, same reasoning as `passwordHash`
+ * never being a plaintext password. `usedAt` (not deletion) records
+ * single-use consumption — an append-only fact, not a silent disappearance.
+ */
+export interface PasswordResetToken {
+  id: string;
+  userId: UserId;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  usedAt: Timestamp | null;
+}

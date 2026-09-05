@@ -1470,3 +1470,85 @@ managed cloud infrastructure, no fabricated credentials, no rebuild of BUILD 00-
   audit (unchanged, still needs a deliberate `vite@8` upgrade); defense-in-depth path validation inside
   `LocalDiskAssetStore` itself (not reachable today — the HTTP route regex and WHATWG URL normalization
   already prevent a slash from ever reaching it — flagged as a nice-to-have, not a real gap).
+
+## 33. BUILD 19 Production Readiness / Live AI / Account Recovery Implementation Record
+
+Closes two of RELEASE 02's own explicitly-out-of-scope items (password reset, and a documented identity
+boundary), audits the six real AI provider adapters for production-shaped failure handling, adds a real
+dependency-readiness endpoint, and adds one fail-fast production config rule. No managed cloud infrastructure
+was introduced — this remains a zero-external-vendor deployment (§13 still open) until an operator chooses one.
+
+- **Account recovery** (`apps/api/src/auth/reset-token.ts`, `email-sender.ts`; `PasswordResetToken`,
+  `packages/project-core/src/user.ts`; `SqlitePasswordResetTokenRepository`, storage-adapters) — a real,
+  single-use, hashed, expiring token flow. The raw token (`randomBytes(32)`, base64url) is only ever emailed;
+  the DB stores its SHA-256 hash (fast hash deliberately chosen over `scrypt` here — the token is already
+  256 bits of real entropy, not a user-chosen secret, so a slow KDF buys nothing and only cheapens the
+  operation). `POST /auth/password-reset/request` always returns the same generic 202 whether or not the
+  email exists (enumeration-safe by construction); `POST /auth/password-reset/confirm` rejects an
+  unknown/expired/already-used token with one generic `INVALID_OR_EXPIRED_RESET_TOKEN`, and on success
+  updates the password hash, marks the token used (never deleted — an append-only fact), and calls
+  `SessionRepository.deleteAllForUser()` so every existing session is revoked, not just the one that reset it.
+  Both endpoints sit behind their own IP-keyed `PASSWORD_RESET_RATE_LIMIT` (5/min). The real vendor choice for
+  actually sending an email stays deliberately deferred — `EmailSender` is a real interface,
+  `InMemoryEmailSender` (records sends in an array) is its only implementation today, the same
+  "concrete engine deferred, interface real" pattern BUILD 18 already established for `JobQueue`/`AssetStore`.
+- **Identity provider boundary** (`apps/api/src/auth/identity-provider.ts`) — `requireAuth()`
+  (`apps/api/src/auth/session.ts`) no longer looks up a session/user row itself; it delegates entirely to an
+  injected `IdentityProvider.verifySession()`. `createLocalIdentityProvider()` is the only implementation
+  today (wraps the same real `SessionRepository`/`UserRepository` RELEASE 02 already built) — a managed
+  provider (Auth0/Clerk/Cognito/etc.) would implement this same three-method-shaped interface without
+  `requireAuth()` or any route changing at all. Chosen over adopting a managed provider outright because no
+  such vendor was requested or available to validate against; the boundary exists so that choice is a future,
+  isolated swap, not a rewrite.
+- **Live AI provider audit** (all 6 real adapters: Gemini vision/reference/QC, Nano Banana, ChatGPT Image,
+  Veo) — every provider fetch now goes through `packages/shared/src/fetch-timeout.ts`'s `fetchWithTimeout()`
+  (a real `AbortController`, 60s default; Veo's video *download* specifically uses 180s, since a real
+  rendered video is larger/slower than a JSON response), with a real `ProviderTimeoutError` caught and
+  re-classified into each adapter's own existing error code (`retryable: true`) rather than left to hang or
+  surface as an opaque generic failure. No retry-on-timeout was added server-side — deliberately: image/video
+  generation is not free to blindly re-submit (real cost, possible duplicate output), and BUILD 17's
+  regenerate route already gives the caller an explicit, deliberate retry path once, which is the right layer
+  for this decision, not a silent background retry. No unified `AIProvider { analyze, generate, edit, health }`
+  interface was introduced: the six adapters already sit behind narrower, real, per-capability interfaces
+  (`VisionAnalysisEngine`, `ReferenceIntelligence`, `AiQc`, `ImageGenerationAdapter`, video adapters) that
+  cleanly separate meaningfully different request/response shapes; collapsing them would be a rewrite with no
+  behavioral benefit (CLAUDE.md rule 8). Everything else RELEASE 01/02 already verified for these adapters —
+  server-side-only secret handling, no key ever reaching a client response or log, provider-specific error
+  classification, request-size limits, generated-asset persistence, and job-status failure cleanup (a thrown
+  `generate()` marks the job `failed` and rethrows *before* any asset write — no orphaned partial output) —
+  was re-confirmed unchanged, not re-implemented.
+- **`GET /ready`** (`apps/api/src/readiness.ts`) — distinct from BUILD 18's unconditional `GET /health`
+  ("process is alive"): this runs one real, cheap probe against each dependency a request genuinely can't
+  succeed without (`ProjectRepository.getById()` and `AssetStore.get()`, both against a random,
+  guaranteed-absent id — never a table scan, never real data touched), returns `200`/`ready` only when both
+  report `ok`, else `503`/`not_ready` with a per-check `ok`/`error` detail — never a stack trace, a file path,
+  or a secret. Queue/logging/metrics/error-monitoring boundaries were audited, not rebuilt: `JobQueue`,
+  `createConsoleLogger()`, and `createInMemoryMetrics()` (`GET /metrics`) are already real, swappable
+  interfaces from BUILD 17/18 with no BUILD 19 gap found in them worth a code change.
+- **One new fail-fast production config rule** (`packages/shared/src/env.ts`'s `serverEnvSchema.superRefine()`)
+  — `TRUST_HTTPS=true` without `ASSET_URL_SIGNING_SECRET` now refuses to start, rather than silently serving
+  unsigned asset URLs in what the operator declared a trusted-HTTPS deployment. No other field was made
+  mandatory: e.g. `REGISTRATION_SECRET` unset stays a valid, intentional "registration permanently closed"
+  choice, not a misconfiguration (§13, unchanged reasoning). No new env var names were introduced.
+- **Live provider smoke test** (`apps/api/src/live-provider-smoke.test.ts`) — real network calls through the
+  real HTTP pipeline (real session, real project-ownership check, real asset persistence, real secure asset
+  retrieval), but only when `RUN_LIVE_PROVIDER_SMOKE_TEST=true` is set; each provider sub-suite is additionally
+  gated on its own real API key being present, so normal CI (no env vars set) makes zero network calls and
+  needs zero credentials — the suite reports as *skipped*, never as a fake pass. Every asset it creates is
+  deleted via the real `DELETE` route at the end of its own test, so a live run never accumulates test images
+  in whatever `ASSET_STORE_URL` is configured. One sub-test (unconfigured `Google Flow` provider) needs no
+  credential at all and exercises real failure behavior end-to-end.
+- **514/514 tests pass, 1 correctly skipped** (was 487 at the end of RELEASE 02); typecheck, lint, and
+  production build all clean; `git diff --check` reported no whitespace errors; diff manually scanned for
+  secret-shaped literals before commit — none found (only fixture passwords matching the existing
+  `TEST_PASSWORD` convention).
+- **Honestly unverified, by design**: no `GEMINI_API_KEY`/`NANO_BANANA_API_KEY`/`CHATGPT_IMAGE_API_KEY`/
+  `VEO_API_KEY` exists in this environment, so none of the six AI providers has ever actually been exercised
+  against its real API in this session — only validated against current provider documentation and proven via
+  the fetch-timeout mechanism's own real (non-mocked-timer) test. Real email delivery (SMTP/SES/SendGrid/etc.)
+  remains unimplemented — `InMemoryEmailSender` only. A managed identity provider remains unimplemented — the
+  boundary exists, nothing implements it but the local one. This is a **PRODUCTION CANDIDATE**, not
+  PRODUCTION READY: the remaining gap to PRODUCTION READY is exclusively external infrastructure this
+  environment cannot supply (a real email vendor, a real managed DB/object-store/queue if the operator wants
+  one instead of node:sqlite/local-disk, and — before any AI feature is trusted in production — actually
+  running each provider once against a real credential).
