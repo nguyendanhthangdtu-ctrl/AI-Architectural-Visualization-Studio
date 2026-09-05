@@ -1,6 +1,15 @@
 .root {
   flex: 1;
-  min-height: 0;
+  /* BUILD 26 (real defect found via live browser QA) — min-height: 0
+     combined with overflow: hidden let this row (Controls + Canvas +
+     Inspector — the app's single most important area) collapse to
+     literally zero visible height once enough sibling panels (QCPanel,
+     MultiViewPanel, EditPanel, VideoPanel, ResultActions) accumulated
+     height inside ModuleWorkspace's fixed 100vh shell (AppShell.module.css).
+     A real floor keeps the canvas/controls always visible; the page now
+     grows past 100vh and scrolls naturally when the panel list below is
+     tall, instead of the canvas silently disappearing. */
+  min-height: 420px;
   display: flex;
   overflow: hidden;
 }
