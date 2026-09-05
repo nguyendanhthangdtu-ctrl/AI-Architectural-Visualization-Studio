@@ -182,6 +182,51 @@ describe('MultiViewPanel — BUILD 15 Multi-View / Sync / Creative View', () => 
       expect(store.getState().latestGenerationOutputUrls).toEqual(['/assets/out-2']);
     });
 
+    it('BUILD 30 FIX: clears a stale QC result from the previous generation once a new view succeeds', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            jobId: 'job-1',
+            viewId: 'view-1',
+            generationId: 'gen-2',
+            versionId: 'v2',
+            project: PROJECT,
+            view: { id: 'view-1', mode: 'sync' },
+            generation: { id: 'gen-2', status: 'succeeded', outputAssets: ['out-2'] },
+            outputAssetUrls: ['/assets/out-2'],
+          },
+          { status: 201 },
+        ),
+      );
+
+      const baseRequest = await buildBaseRequest();
+      const store = new ProjectSessionStore({
+        ...createInitialProjectSessionState(),
+        currentProject: PROJECT,
+        sourceImage: { assetId: 'a1', url: '/assets/a1' },
+        promptOutput: fakePromptOutput(baseRequest),
+        latestGenerationId: 'gen-1', // a PREVIOUS generation this stale QC result belongs to
+        qcState: {
+          decision: 'pass',
+          scores: { architectureScore: 1, cameraScore: 1, materialScore: 1, lightingScore: 1, objectConsistencyScore: 1, photorealismScore: 1 },
+          issues: [],
+          correctionInstruction: null,
+        },
+      });
+      render(
+        <ProjectSessionProvider store={store}>
+          <MultiViewPanel />
+        </ProjectSessionProvider>,
+      );
+
+      fireEvent.change(screen.getByLabelText('Perspective'), { target: { value: "bird's eye" } });
+      fireEvent.click(screen.getByRole('button', { name: /generate view/i }));
+
+      await waitFor(() => expect(store.getState().latestGenerationId).toBe('gen-2'));
+      expect(store.getState().qcState).toBeNull();
+    });
+
     it('shows the real error envelope, not a fake result, when the view request fails', async () => {
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       fetchMock.mockResolvedValueOnce(

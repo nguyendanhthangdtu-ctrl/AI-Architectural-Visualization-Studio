@@ -1,4 +1,5 @@
 import { z } from '@avs/shared';
+import { SCENARIO_ASPECT_RATIOS, SCENARIO_RESOLUTIONS } from '@avs/ai-core';
 
 /**
  * Request-body schema validation at the API boundary — CLAUDE.md coding
@@ -92,12 +93,28 @@ export type RunReferenceExtractionRequest = z.infer<typeof runReferenceExtractio
  */
 export const renderCoreSchema = z.enum(['Nano Banana', 'Nano Banana Pro', 'Google Flow', 'ChatGPT Image']);
 
+/**
+ * BUILD 30 FIX — a real gap found during rendering-pipeline hardening: these
+ * were previously any non-empty string, so a garbage value ("abc", "0:0")
+ * passed route validation and only got silently defaulted deep inside each
+ * adapter's own mapping function (nano-banana-adapter.ts's
+ * `mapResolutionToImageSize`, chatgpt-image-adapter.ts's
+ * `mapAspectRatioToSize`/`mapResolutionToQuality`) instead of being rejected
+ * — BUILD 30 spec item 7 explicitly requires rejecting unsupported ratio/
+ * resolution values, never a silent fallback. Closed to the exact same
+ * vocabulary the UI itself offers (`packages/ai-core`'s
+ * scenario-vocabulary.ts, the single source of truth — includes 'Custom' as
+ * a real, user-selectable value, per docs/07).
+ */
+export const aspectRatioSchema = z.enum(SCENARIO_ASPECT_RATIOS);
+export const resolutionSchema = z.enum(SCENARIO_RESOLUTIONS);
+
 /** docs/11_IMAGE_GENERATION_SPEC.md step 1 "Validate request" (BUILD 13). */
 export const runGenerationRequestSchema = z.object({
   promptText: z.string().trim().min(1, 'promptText must not be empty'),
   renderCore: renderCoreSchema,
-  aspectRatio: z.string().trim().min(1, 'aspectRatio must not be empty'),
-  resolution: z.string().trim().min(1, 'resolution must not be empty'),
+  aspectRatio: aspectRatioSchema,
+  resolution: resolutionSchema,
   sourceAssetId: z.string().trim().min(1, 'sourceAssetId must not be empty'),
   referenceAssetIds: z.array(z.string().trim().min(1)).default([]),
   promptVersion: z.string().trim().min(1, 'promptVersion must not be empty'),
@@ -126,8 +143,8 @@ export const runEditRequestSchema = z.object({
   intendedChange: z.string().trim().min(1, 'intendedChange must not be empty'),
   category: editCategorySchema,
   protectedLocks: z.array(lockIdSchema).default([]),
-  aspectRatio: z.string().trim().min(1, 'aspectRatio must not be empty'),
-  resolution: z.string().trim().min(1, 'resolution must not be empty'),
+  aspectRatio: aspectRatioSchema,
+  resolution: resolutionSchema,
 });
 
 export type RunEditRequest = z.infer<typeof runEditRequestSchema>;

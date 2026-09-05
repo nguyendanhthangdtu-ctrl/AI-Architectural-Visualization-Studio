@@ -148,6 +148,39 @@ describe('EditPanel — BUILD 14 Advanced Editor', () => {
       expect((screen.getByLabelText('Target region') as HTMLInputElement).value).toBe('');
     });
 
+    it('BUILD 30 FIX: clears a stale QC result from before the edit once the edit succeeds', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            jobId: 'job-1',
+            editId: 'edit-1',
+            versionId: 'v1',
+            project: PROJECT,
+            edit: { id: 'edit-1', status: 'succeeded', resultingAssetId: 'out-2' },
+            outputAssetUrls: ['/assets/out-2'],
+          },
+          { status: 201 },
+        ),
+      );
+
+      const store = renderWithState({
+        ...READY_STATE,
+        qcState: {
+          decision: 'pass',
+          scores: { architectureScore: 1, cameraScore: 1, materialScore: 1, lightingScore: 1, objectConsistencyScore: 1, photorealismScore: 1 },
+          issues: [],
+          correctionInstruction: null,
+        },
+      });
+      fireEvent.change(screen.getByLabelText('Target region'), { target: { value: 'the facade material' } });
+      fireEvent.change(screen.getByLabelText('Intended change'), { target: { value: 'replace with warm wood cladding' } });
+      fireEvent.click(screen.getByRole('button', { name: /apply edit/i }));
+
+      await waitFor(() => expect(store.getState().latestOutputAssetId).toBe('out-2'));
+      expect(store.getState().qcState).toBeNull();
+    });
+
     it('shows the real error envelope, not a fake result, when the edit fails', async () => {
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       fetchMock.mockResolvedValueOnce(

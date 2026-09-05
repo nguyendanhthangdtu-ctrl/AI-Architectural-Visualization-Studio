@@ -291,7 +291,7 @@ describe('Mock E2E — Nano Banana 2 (BUILD 25 Part 14-G)', () => {
         promptText: 'a modern villa',
         renderCore: 'Nano Banana',
         aspectRatio: '1:1',
-        resolution: '1K',
+        resolution: 'Preview', // BUILD 30 FIX — 'resolution' is the app's own closed vocabulary (SCENARIO_RESOLUTIONS), not a provider-level image_size string; '1K' was never a valid app-level value
         sourceAssetId: asset.id,
         referenceAssetIds: [],
         promptVersion: 'v1',

@@ -395,6 +395,34 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
     await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
+  it('BUILD 30 FIX: rejects an unsupported aspectRatio rather than silently falling back inside an adapter', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, aspectRatio: '0:0', sourceAssetId: asset.id, referenceAssetIds: [] }),
+    }, session.cookie));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('BUILD 30 FIX: rejects an unsupported resolution rather than silently falling back inside an adapter', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, resolution: '1K', sourceAssetId: asset.id, referenceAssetIds: [] }),
+    }, session.cookie));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
   it('marks the job failed, not silently succeeded, when the adapter throws', async () => {
     const failingAdapter: ImageGenerationAdapter = {
       ...fakeSucceedingAdapter('nano-banana'),

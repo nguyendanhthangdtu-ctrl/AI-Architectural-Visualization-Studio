@@ -233,6 +233,30 @@ describe('apps/api edit route (BUILD 14 Advanced Image Editor)', () => {
     await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
+  it('BUILD 30 FIX: rejects an unsupported aspectRatio/resolution rather than passing it through to the provider', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    context.imageGenerationService = new ImageGenerationService({ 'nano-banana': editCapableAdapter('nano-banana') });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, generationId, asset } = await createProjectAssetAndGeneration(session);
+
+    const badRatioRes = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/edits`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_EDIT_BODY, aspectRatio: 'not-a-ratio', sourceAssetId: asset.id }),
+    }, session.cookie));
+    expect(badRatioRes.status).toBe(400);
+    await expect(badRatioRes.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    const badResolutionRes = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/edits`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_EDIT_BODY, resolution: '1K', sourceAssetId: asset.id }),
+    }, session.cookie));
+    expect(badResolutionRes.status).toBe(400);
+    await expect(badResolutionRes.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
   it("returns 501 EDIT_NOT_SUPPORTED when the parent generation's adapter has no edit(), never silently falling back to generate()", async () => {
     const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     context.imageGenerationService = new ImageGenerationService({ 'nano-banana': noEditAdapter('nano-banana') });

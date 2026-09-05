@@ -68,6 +68,13 @@ export function EditPanel() {
       setState({
         latestGenerationOutputUrls: result.outputAssetUrls,
         latestOutputAssetId: result.edit.resultingAssetId,
+        // BUILD 30 FIX — same defect class as BUILD 28's Render fix
+        // (ModuleWorkspace.tsx): a successful edit produces a new,
+        // never-verified output, but this previously left a PASS/FAIL QC
+        // result from before the edit displayed against it. QC is
+        // per-generation (docs/15) and must be re-run against the edited
+        // output before any verdict is shown for it again.
+        qcState: null,
       });
       setTargetRegionDescription('');
       setIntendedChange('');

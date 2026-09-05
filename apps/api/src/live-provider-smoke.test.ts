@@ -131,7 +131,7 @@ describe.skipIf(!LIVE_SMOKE_TEST_ENABLED)('Live AI provider smoke test (BUILD 19
             promptText: 'A single red sphere on a white background',
             renderCore: 'Nano Banana',
             aspectRatio: '1:1',
-            resolution: '1K',
+            resolution: 'Preview', // BUILD 30 FIX — the app's own closed resolution vocabulary (SCENARIO_RESOLUTIONS); 'Preview' maps to each adapter's cheapest real tier
             sourceAssetId: assetId,
             referenceAssetIds: [],
             promptVersion: 'live-smoke-test:v1',
@@ -173,7 +173,7 @@ describe.skipIf(!LIVE_SMOKE_TEST_ENABLED)('Live AI provider smoke test (BUILD 19
             promptText: 'A single red sphere on a white background',
             renderCore: 'Nano Banana Pro',
             aspectRatio: '1:1',
-            resolution: '1K',
+            resolution: 'Preview', // BUILD 30 FIX — the app's own closed resolution vocabulary (SCENARIO_RESOLUTIONS); 'Preview' maps to each adapter's cheapest real tier
             sourceAssetId: assetId,
             referenceAssetIds: [],
             promptVersion: 'live-smoke-test:v1',
@@ -213,7 +213,7 @@ describe.skipIf(!LIVE_SMOKE_TEST_ENABLED)('Live AI provider smoke test (BUILD 19
           promptText: 'test',
           renderCore: 'Google Flow', // docs/03 §7 — real API for this provider does not exist yet, always NOT_IMPLEMENTED
           aspectRatio: '1:1',
-          resolution: '1K',
+          resolution: 'Preview', // BUILD 30 FIX — the app's own closed resolution vocabulary (SCENARIO_RESOLUTIONS)
           sourceAssetId: assetId,
           referenceAssetIds: [],
           promptVersion: 'live-smoke-test:v1',

@@ -88,6 +88,12 @@ export function MultiViewPanel() {
         latestGenerationOutputUrls: result.outputAssetUrls,
         latestGenerationId: result.generationId,
         latestOutputAssetId: result.generation.outputAssets[0] ?? null,
+        // BUILD 30 FIX — same defect class as BUILD 28's Render fix
+        // (ModuleWorkspace.tsx): a View produces a genuinely new generation
+        // (a different `generationId`), but this previously left a
+        // PASS/FAIL QC result from the prior generation displayed as if it
+        // applied to the new view's output. QC is per-generation (docs/15).
+        qcState: null,
         status: 'ready',
       });
       setHeight('');
