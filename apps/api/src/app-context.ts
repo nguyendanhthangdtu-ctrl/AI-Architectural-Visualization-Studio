@@ -20,8 +20,8 @@ import {
   InMemoryViewRepository,
   InMemoryVideoRepository,
 } from '@avs/storage-adapters';
-import type { ReferenceIntelligence, VisionAnalysisEngine } from '@avs/ai-core';
-import { createGeminiReferenceIntelligenceEngine, createGeminiVisionAnalysisEngine } from '@avs/ai-core';
+import type { AiQc, ReferenceIntelligence, VisionAnalysisEngine } from '@avs/ai-core';
+import { createGeminiQcEngine, createGeminiReferenceIntelligenceEngine, createGeminiVisionAnalysisEngine } from '@avs/ai-core';
 import {
   createChatGPTImageAdapter,
   createNanoBananaAdapter,
@@ -55,6 +55,7 @@ export interface AppContext {
   viewRepository: ViewRepository;
   videoRepository: VideoRepository;
   videoGenerationService: VideoGenerationService;
+  aiQcEngine: AiQc;
 }
 
 /**
@@ -96,5 +97,6 @@ export function createAppContext(
       veo: createVeoAdapter({ apiKey: config.veoApiKey }),
       sora: new SoraAdapter(),
     }),
+    aiQcEngine: createGeminiQcEngine({ apiKey: config.geminiApiKey }),
   };
 }

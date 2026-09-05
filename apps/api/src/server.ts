@@ -10,9 +10,11 @@ import {
   handleGetAsset,
   handleGetProject,
   handleGetVideoStatus,
+  handleRegenerate,
   handleRunAnalysis,
   handleRunEdit,
   handleRunGeneration,
+  handleRunQc,
   handleRunVideo,
   handleRunView,
   handleUploadAsset,
@@ -25,6 +27,8 @@ const PROJECT_REFERENCES_ROUTE = /^\/projects\/([^/]+)\/references$/;
 const PROJECT_GENERATIONS_ROUTE = /^\/projects\/([^/]+)\/generations$/;
 const PROJECT_GENERATION_EDITS_ROUTE = /^\/projects\/([^/]+)\/generations\/([^/]+)\/edits$/;
 const PROJECT_GENERATION_VIDEOS_ROUTE = /^\/projects\/([^/]+)\/generations\/([^/]+)\/videos$/;
+const PROJECT_GENERATION_QC_ROUTE = /^\/projects\/([^/]+)\/generations\/([^/]+)\/qc$/;
+const PROJECT_GENERATION_REGENERATE_ROUTE = /^\/projects\/([^/]+)\/generations\/([^/]+)\/regenerate$/;
 const PROJECT_VIEWS_ROUTE = /^\/projects\/([^/]+)\/views$/;
 const PROJECT_VIDEO_ID_ROUTE = /^\/projects\/([^/]+)\/videos\/([^/]+)$/;
 const ASSET_ID_ROUTE = /^\/assets\/([^/]+)$/;
@@ -94,6 +98,18 @@ export function createApp(context: AppContext = createAppContext(), logger = cre
         const projectVideoIdMatch = path.match(PROJECT_VIDEO_ID_ROUTE);
         if (req.method === 'GET' && projectVideoIdMatch) {
           await handleGetVideoStatus(res, context, projectVideoIdMatch[1]!, projectVideoIdMatch[2]!);
+          return;
+        }
+
+        const projectGenerationQcMatch = path.match(PROJECT_GENERATION_QC_ROUTE);
+        if (req.method === 'POST' && projectGenerationQcMatch) {
+          await handleRunQc(req, res, context, projectGenerationQcMatch[1]!, projectGenerationQcMatch[2]!);
+          return;
+        }
+
+        const projectGenerationRegenerateMatch = path.match(PROJECT_GENERATION_REGENERATE_ROUTE);
+        if (req.method === 'POST' && projectGenerationRegenerateMatch) {
+          await handleRegenerate(req, res, context, projectGenerationRegenerateMatch[1]!, projectGenerationRegenerateMatch[2]!);
           return;
         }
 

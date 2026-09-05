@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { AssetId, ProjectId, Timestamp, UserId } from '@avs/shared';
 import { DomainError } from '@avs/shared';
+import type { StructuredIntelligence } from '@avs/ai-core';
+import { deriveProjectDNA } from '@avs/ai-core';
 import type {
   AnalysisRecord,
   AssetRef,
@@ -27,7 +29,9 @@ import {
   runAnalysisRequestSchema,
   runEditRequestSchema,
   runGenerationRequestSchema,
+  runQcRequestSchema,
   runReferenceExtractionRequestSchema,
+  runRegenerateRequestSchema,
   runVideoRequestSchema,
   runViewRequestSchema,
   type RunGenerationRequest,
@@ -436,6 +440,212 @@ export async function handleRunGeneration(
     status: generationResult.status === 'succeeded' ? 'succeeded' : 'failed',
     outputAssets: outputAssets.map((a) => a.id),
     usageMetadata: generationResult.usageMetadata,
+  };
+  await context.generationRepository.create(generationRecord);
+
+  const version: GenerationVersion = {
+    id: randomUUID(),
+    projectId: project.id,
+    parentVersionId: project.currentVersionId || null,
+    kind: 'generation',
+    snapshotRef: generationRecord.id,
+    createdAt: now as Timestamp,
+    createdBy: 'system' as UserId, // no auth yet (BUILD 02 deferral)
+  };
+  await context.versionRepository.create(version);
+
+  const updatedProject = await context.projectRepository.update({
+    ...project,
+    currentVersionId: version.id,
+    updatedAt: now as Timestamp,
+  });
+
+  sendJson(res, 201, {
+    jobId: job.id,
+    generationId: generationRecord.id,
+    versionId: version.id,
+    project: updatedProject,
+    generation: generationRecord,
+    outputAssetUrls: outputAssets.map((a) => `/assets/${a.id}`),
+  });
+}
+
+/**
+ * docs/11 steps 10-11 / docs/15_AI_QC_SPEC.md (BUILD 17) — VERIFY stage.
+ * Compares the generation's output against its source asset and the
+ * "expected structured intent" (docs/03 §4 step 5). `structuredIntelligence`/
+ * `projectDNA` are never re-sent by the client for this — `analysisId` looks
+ * up the already-persisted, already-validated `AnalysisRecord` (BUILD 07) and
+ * `deriveProjectDNA()` (BUILD 08, pure) re-derives Project DNA from it,
+ * avoiding a second transmission/re-validation of the same 12-layer data.
+ */
+export async function handleRunQc(
+  req: IncomingMessage,
+  res: ServerResponse,
+  context: AppContext,
+  projectId: string,
+  generationId: string,
+): Promise<void> {
+  const project = await context.projectRepository.getById(projectId as ProjectId);
+  if (!project) {
+    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
+  }
+
+  const generation = await context.generationRepository.getById(generationId);
+  if (!generation || generation.projectId !== project.id) {
+    throw new DomainError({
+      code: 'GENERATION_NOT_FOUND',
+      message: `No generation with id ${generationId} on project ${projectId}`,
+      retryable: false,
+    });
+  }
+
+  const raw = await readBody(req, MAX_GENERATION_BODY_BYTES);
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw.toString('utf-8'));
+  } catch {
+    throw new DomainError({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.', retryable: false });
+  }
+  const result = runQcRequestSchema.safeParse(parsedJson);
+  if (!result.success) {
+    throw new DomainError({
+      code: 'VALIDATION_ERROR',
+      message: `Invalid QC request: ${result.error.issues.map((i) => i.message).join('; ')}`,
+      retryable: false,
+    });
+  }
+
+  const analysisRecord = await context.analysisRepository.getById(result.data.analysisId);
+  if (!analysisRecord || analysisRecord.projectId !== project.id) {
+    throw new DomainError({
+      code: 'ANALYSIS_NOT_FOUND',
+      message: `No analysis with id ${result.data.analysisId} on project ${projectId}`,
+      retryable: false,
+    });
+  }
+  const structuredIntelligence = analysisRecord.structuredIntelligence as StructuredIntelligence;
+
+  const sourceAssetId = generation.sourceAssets[0];
+  if (!sourceAssetId) {
+    throw new DomainError({
+      code: 'ASSET_NOT_FOUND',
+      message: `Generation ${generationId} has no source asset recorded.`,
+      retryable: false,
+    });
+  }
+  const sourceAsset = await resolveAssetOrThrow(context, project, sourceAssetId, 'source asset');
+
+  const outputAssetId = result.data.outputAssetId ?? generation.outputAssets[0];
+  if (!outputAssetId) {
+    throw new DomainError({
+      code: 'ASSET_NOT_FOUND',
+      message: `Generation ${generationId} has no output asset to evaluate.`,
+      retryable: false,
+    });
+  }
+  const outputAsset = await resolveAssetOrThrow(context, project, outputAssetId, 'output asset');
+
+  const enabledLocks = result.data.locks.filter((lock) => lock.enabled).map((lock) => lock.id);
+  const qc = await context.aiQcEngine.evaluate({
+    sourceAsset: { data: sourceAsset.data, contentType: sourceAsset.ref.contentType },
+    outputAsset: { data: outputAsset.data, contentType: outputAsset.ref.contentType },
+    normalizedRequest: {
+      structuredIntelligence,
+      projectDNA: deriveProjectDNA(structuredIntelligence),
+      enabledLocks,
+      resolvedStyle: result.data.resolvedStyle ?? structuredIntelligence.layers.style.data.style,
+      instructions: result.data.instructions,
+    },
+  });
+
+  sendJson(res, 200, { generationId, qc });
+}
+
+/**
+ * docs/03 §4 step 5 VERIFY→CREATE loop / docs/15 "regeneration ... preserves
+ * all valid prior constraints" (BUILD 17). Reuses `submitGeneration` — the
+ * exact same CREATE-stage helper `/generations` already uses — since the
+ * correction itself was already folded into the client's re-resolved
+ * Reasoning Engine `instructions` and recompiled prompt (the same "client
+ * owns Reasoning Engine + Prompt Compiler" pattern as every other render,
+ * BUILD 08/11's `conflicts`-preserving resolution already does this for
+ * real). This route's own job is only submitting it again and recording
+ * *why*, for provenance (CLAUDE.md rule 14): `correctionInstruction` and
+ * which failed generation this regenerates.
+ */
+export async function handleRegenerate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  context: AppContext,
+  projectId: string,
+  generationId: string,
+): Promise<void> {
+  const project = await context.projectRepository.getById(projectId as ProjectId);
+  if (!project) {
+    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
+  }
+
+  const failedGeneration = await context.generationRepository.getById(generationId);
+  if (!failedGeneration || failedGeneration.projectId !== project.id) {
+    throw new DomainError({
+      code: 'GENERATION_NOT_FOUND',
+      message: `No generation with id ${generationId} on project ${projectId}`,
+      retryable: false,
+    });
+  }
+
+  const raw = await readBody(req, MAX_GENERATION_BODY_BYTES);
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw.toString('utf-8'));
+  } catch {
+    throw new DomainError({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON.', retryable: false });
+  }
+  const result = runRegenerateRequestSchema.safeParse(parsedJson);
+  if (!result.success) {
+    throw new DomainError({
+      code: 'VALIDATION_ERROR',
+      message: `Invalid regenerate request: ${result.error.issues.map((i) => i.message).join('; ')}`,
+      retryable: false,
+    });
+  }
+
+  const sourceAsset = await resolveAssetOrThrow(context, project, result.data.sourceAssetId, 'asset');
+  const referenceAssets = await Promise.all(
+    result.data.referenceAssetIds.map((assetId) => resolveAssetOrThrow(context, project, assetId, 'reference asset')),
+  );
+
+  const { job, adapter, generationResult, outputAssets } = await submitGeneration({
+    context,
+    project,
+    renderCore: result.data.renderCore,
+    promptText: result.data.promptText,
+    aspectRatio: result.data.aspectRatio,
+    resolution: result.data.resolution,
+    sourceAsset,
+    referenceAssets,
+  });
+
+  const now = new Date().toISOString();
+  const generationRecord: GenerationRecord = {
+    id: randomUUID(),
+    projectId: project.id,
+    viewId: null,
+    provider: adapter.id,
+    model:
+      typeof generationResult.usageMetadata['model'] === 'string' ? (generationResult.usageMetadata['model'] as string) : 'unknown',
+    promptVersion: result.data.promptVersion,
+    scenarioVersion: result.data.scenarioVersion,
+    sourceAssets: [sourceAsset.ref.id],
+    referenceAssets: referenceAssets.map((a) => a.ref.id),
+    status: generationResult.status === 'succeeded' ? 'succeeded' : 'failed',
+    outputAssets: outputAssets.map((a) => a.id),
+    usageMetadata: {
+      ...generationResult.usageMetadata,
+      regeneratedFromGenerationId: failedGeneration.id,
+      correctionInstruction: result.data.correctionInstruction,
+    },
   };
   await context.generationRepository.create(generationRecord);
 

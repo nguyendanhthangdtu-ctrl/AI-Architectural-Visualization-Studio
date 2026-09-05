@@ -1,0 +1,106 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--avs-space-2);
+  padding: var(--avs-space-3);
+  border: 1px solid var(--avs-border);
+  border-radius: var(--avs-radius-md);
+  background: var(--avs-bg-panel);
+}
+
+.title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--avs-text-secondary);
+}
+
+.runButton,
+.regenerateButton {
+  padding: var(--avs-space-2) var(--avs-space-3);
+  border: 1px solid var(--avs-accent);
+  border-radius: var(--avs-radius-sm);
+  background: transparent;
+  color: var(--avs-accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.runButton:hover:not(:disabled),
+.regenerateButton:hover:not(:disabled) {
+  background: var(--avs-bg-panel-raised);
+}
+
+.runButton:disabled,
+.regenerateButton:disabled {
+  color: var(--avs-text-muted);
+  border-color: var(--avs-border-strong);
+  cursor: not-allowed;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--avs-space-2);
+}
+
+.decision {
+  align-self: flex-start;
+  padding: 2px var(--avs-space-2);
+  border-radius: var(--avs-radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.result[data-decision='pass'] .decision {
+  background: var(--avs-success-bg, #143a2b);
+  color: var(--avs-success-text, #4ade80);
+}
+
+.result[data-decision='fail'] .decision {
+  background: var(--avs-danger-bg, #3a1414);
+  color: var(--avs-danger-text, #f87171);
+}
+
+.scores {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scoreRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--avs-text-primary);
+}
+
+.issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.issue {
+  font-size: 12px;
+  color: var(--avs-text-secondary);
+  border-left: 2px solid var(--avs-border-strong);
+  padding-left: var(--avs-space-2);
+}
+
+.issue[data-severity='high'] {
+  border-left-color: var(--avs-danger-text, #f87171);
+}
+
+.issue[data-severity='medium'] {
+  border-left-color: var(--avs-accent);
+}

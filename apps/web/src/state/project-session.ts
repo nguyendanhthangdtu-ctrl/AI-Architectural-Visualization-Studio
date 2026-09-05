@@ -1,7 +1,14 @@
 import type { ErrorEnvelope, LanguageConfig } from '@avs/shared';
 import { DEFAULT_LANGUAGE_CONFIG } from '@avs/shared';
 import type { GenerationVersion, LockState, Project, ProjectDNA } from '@avs/project-core';
-import type { ExtractedVisualLanguage, QCResult, ReferencePurpose, Scenario, StructuredIntelligence } from '@avs/ai-core';
+import type {
+  ExtractedVisualLanguage,
+  NormalizedRequest,
+  QCResult,
+  ReferencePurpose,
+  Scenario,
+  StructuredIntelligence,
+} from '@avs/ai-core';
 import type { CanonicalMasterPrompt, PromptOutput } from '@avs/prompt-engine';
 
 /**
@@ -57,6 +64,8 @@ export interface ProjectSessionState {
    * now would implement that gate prematurely.
    */
   structuredIntelligence: StructuredIntelligence | null;
+  /** Id of the persisted `AnalysisRecord` (BUILD 07) this project's `structuredIntelligence` came from — needed by AI QC (BUILD 17) to look up the same real analysis server-side instead of re-transmitting it. */
+  analysisId: string | null;
   locks: LockState[];
   /**
    * User-editable draft text in the Prompt Editor — distinct from `prompt`
@@ -67,6 +76,8 @@ export interface ProjectSessionState {
   prompt: CanonicalMasterPrompt | null;
   /** Full amendment-shaped compiled output (BUILD 11) — structured intelligence, canonical bilingual DNA, and both master prompts. */
   promptOutput: PromptOutput | null;
+  /** The Reasoning Engine's resolved output (BUILD 08) from the most recent Compile Prompt — AI QC (BUILD 17) needs the enabled locks/resolved style/instructions this captured to know what the render was actually expected to preserve. */
+  normalizedRequest: NormalizedRequest | null;
   generationHistory: GenerationVersion[];
   /** Output image(s) from the most recent successful generation OR edit (BUILD 13/14) — shown in the Canvas in place of the source viewport. */
   latestGenerationOutputUrls: string[];
@@ -89,10 +100,12 @@ export function createInitialProjectSessionState(): ProjectSessionState {
     references: [],
     scenario: null,
     structuredIntelligence: null,
+    analysisId: null,
     locks: [],
     promptDraft: '',
     prompt: null,
     promptOutput: null,
+    normalizedRequest: null,
     generationHistory: [],
     latestGenerationOutputUrls: [],
     latestGenerationId: null,

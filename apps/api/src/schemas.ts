@@ -160,3 +160,36 @@ export const runVideoRequestSchema = z.object({
 });
 
 export type RunVideoRequest = z.infer<typeof runVideoRequestSchema>;
+
+/**
+ * docs/15_AI_QC_SPEC.md (BUILD 17) — "expected structured intent" QC compares
+ * the output against. Only `locks` (which attributes must be preserved) needs
+ * real per-field validation here: `structuredIntelligence`/`projectDNA` are
+ * NOT re-transmitted by the client — `analysisId` looks up the already
+ * real-validated `AnalysisRecord` from BUILD 07 (avoids re-deriving/
+ * duplicating the 12-layer zod schema at this boundary, CLAUDE.md rule 9).
+ */
+export const qcLockStateSchema = z.object({ id: lockIdSchema, enabled: z.boolean() });
+
+export const runQcRequestSchema = z.object({
+  analysisId: z.string().trim().min(1, 'analysisId must not be empty'),
+  outputAssetId: z.string().trim().min(1).optional(),
+  locks: z.array(qcLockStateSchema).length(5, 'locks must include exactly the 5 known locks'),
+  resolvedStyle: z.string().trim().min(1).optional(),
+  instructions: z.array(z.string()).default([]),
+});
+
+export type RunQcRequest = z.infer<typeof runQcRequestSchema>;
+
+/**
+ * docs/03 §4 VERIFY→CREATE loop (BUILD 17) — same shape as a normal
+ * generation request (the client re-resolves the Reasoning Engine with the
+ * correction folded into `instructions` and recompiles, same as any other
+ * render) plus the `correctionInstruction` that triggered it, kept for
+ * provenance (CLAUDE.md rule 14).
+ */
+export const runRegenerateRequestSchema = runGenerationRequestSchema.extend({
+  correctionInstruction: z.string().trim().min(1, 'correctionInstruction must not be empty'),
+});
+
+export type RunRegenerateRequest = z.infer<typeof runRegenerateRequestSchema>;

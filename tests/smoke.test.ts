@@ -5,7 +5,7 @@ import {
   createGeminiReferenceIntelligenceEngine,
   reasoningEngine,
   scenarioBuilder,
-  aiQc,
+  createGeminiQcEngine,
 } from '@avs/ai-core';
 import { promptCompiler } from '@avs/prompt-engine';
 import { ImageGenerationService, FutureAdapter } from '@avs/model-adapters';
@@ -29,7 +29,7 @@ describe('BUILD 02 smoke test', () => {
     expect(createGeminiReferenceIntelligenceEngine({ apiKey: undefined })).toBeDefined();
     expect(reasoningEngine).toBeDefined();
     expect(scenarioBuilder).toBeDefined();
-    expect(aiQc).toBeDefined();
+    expect(createGeminiQcEngine({ apiKey: undefined })).toBeDefined();
   });
 
   it('loads the prompt compiler boundary from @avs/prompt-engine', () => {

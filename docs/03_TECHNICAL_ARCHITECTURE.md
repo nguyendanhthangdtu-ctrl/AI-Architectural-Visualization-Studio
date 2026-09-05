@@ -1206,3 +1206,78 @@ deliberate, documented scoping choice).
   path editor (motion is text-described, matching the Advanced Editor's text-described target-region
   precedent from BUILD 14); video output is not chained into a further Edit/View (docs/14 doesn't describe
   video as an input to another generation step).
+
+## 30. BUILD 17 AI QC / Auto-Regeneration Implementation Record
+
+docs/15's VERIFY stage, real for the first time: `aiQc.evaluate()` (`packages/ai-core/src/qc.ts`) had been a
+`NOT_IMPLEMENTED` contract stub since BUILD 02/16 — this gate implements it and wires the VERIFY→CREATE loop
+docs/03 §4 step 5 describes.
+
+- **Real gap found and closed before implementation**: docs/03 §5's `NormalizedRequest` (the Reasoning
+  Engine's output) is computed entirely client-side (`ControlPanel.tsx`'s `reasoningEngine.resolve()`) and was
+  discarded after prompt compilation — never persisted, never sent to `apps/api`. QC's own contract needs to
+  compare against exactly that "expected structured intent." Rather than re-plumbing the entire
+  `NormalizedRequest` tree across the wire (duplicating zod schemas for the 12-layer analysis, `Lock[]`,
+  `NormalizedScenario`, etc. — disproportionate, and would duplicate business rules already enforced
+  elsewhere, CLAUDE.md rule 9): `structuredIntelligence` is looked up server-side from the already-persisted,
+  already-validated `AnalysisRecord` (BUILD 07) via a client-supplied `analysisId` (the API already returned
+  this at analysis time; the client just wasn't keeping it — now it does, `ProjectSessionState.analysisId`).
+  `ProjectDNA` is re-derived server-side from that via the existing pure `deriveProjectDNA()` (BUILD 08) — no
+  duplication. Only `locks` (as minimal `{id, enabled}` pairs, not the full audit-trail `Lock` shape) crosses
+  the wire with real per-field validation, since "which attributes must be preserved" is the one piece
+  genuinely safety-critical to QC (CLAUDE.md rules 2-4) and not derivable from anything already server-side.
+- **`AiQc.evaluate()` contract corrected before implementation** (`packages/ai-core/src/qc.ts`): docs/03 §5's
+  representative signature (`sourceAssetUrl`/`outputAssetUrl: string`) would hit the exact problem BUILD 13
+  already found and fixed for `GenerationRequest` — `apps/api` only ever has relative `/assets/:id` paths, not
+  fetchable absolute URLs. Corrected to real bytes (`QcAssetRef { data, contentType }`), same reasoning as
+  `SourceAssetRef`/`ReferenceAssetRef`/`GenerationAssetRef`. `normalizedRequest` is typed as a new, narrower
+  `QcNormalizedRequestContext` (structuredIntelligence/projectDNA/enabledLocks/resolvedStyle/instructions) —
+  not the full `NormalizedRequest` — since `scenario`/`references`/`conflicts` steer prompt COMPILATION
+  (BUILD 09/11) but add nothing docs/15's 6 scores need to verify.
+- **`createGeminiQcEngine()`** (new, `packages/ai-core/src/gemini-qc-engine.ts`) — same provider/API shape as
+  BUILD 07/10's Gemini engines (Interactions API, validated against current docs, unverified live — no
+  `GEMINI_API_KEY` available at implementation time, same caveat as every prior Gemini integration), extended
+  to a two-image request (source + output) plus the expected-intent context serialized into the prompt.
+  `computeQcDecision()` is deterministic, never trusts the model's own opinion of pass/fail (same philosophy
+  as BUILD 07's "the zod schema is the actual enforcement point," not the model's own claim): a score below
+  `QC_SCORE_THRESHOLD` (0.7 — a product decision made at implementation time, docs/15 names no concrete
+  number, flagged for future tuning) only fails the attributes whose Lock is enabled (architecture/camera/
+  material/lighting); `objectConsistencyScore`/`photorealismScore` have no corresponding Lock in the 5-lock
+  model, so they're always enforced. `correctionInstruction` is drafted by the model but only ever surfaced
+  on a real `fail`; a fallback is synthesized from the issues list if the model omits one on a fail.
+- **`POST /projects/:id/generations/:id/qc`** (`handleRunQc`, `apps/api/src/routes.ts`) — loads the
+  `GenerationRecord` + the `AnalysisRecord` named by the client's `analysisId`, resolves real source/output
+  asset bytes, derives `ProjectDNA`, and calls the real engine. **`POST
+  /projects/:id/generations/:id/regenerate`** (`handleRegenerate`) — reuses `submitGeneration()`, the exact
+  same CREATE-stage helper `/generations` already uses (no duplicated business rules): the correction itself
+  was already folded into the client's re-resolved Reasoning Engine `instructions` and recompiled prompt
+  (the same "client owns Reasoning Engine + Prompt Compiler" pattern as every other render); this route's own
+  job is only submitting it again and recording *why*, for provenance (CLAUDE.md rule 14) —
+  `correctionInstruction` and `regeneratedFromGenerationId` land in the new `GenerationRecord.usageMetadata`.
+  Neither route changes `GenerationRecord`'s shape or touches the existing `/generations`/`/edits`/`/views`/
+  `/videos` routes.
+- **UI wiring**: `QCPanel` (new) — "Run QC" (enabled once a generation, its source analysis, and the real
+  5-lock set all exist), showing a PASS/FAIL badge, all 6 scores, and any issues; "Regenerate" appears only on
+  a real `fail` and only once a `correctionInstruction` exists. A new shared helper,
+  `apps/web/src/prompt-compilation.ts`'s `compileNormalizedPrompt()`, factors the Reasoning Engine →
+  Prompt Compiler step out of `ControlPanel`'s Compile Prompt action so Regenerate can fold the correction
+  into `instructions` and run the exact same real resolution, not a second copy of it (CLAUDE.md rule 9).
+  `ProjectSessionState` gained `analysisId` (previously returned by the analysis route but discarded) and
+  `normalizedRequest` (previously discarded after compiling) — both needed by QC, neither invented.
+- **Dead code removed**: `packages/ai-core/src/not-implemented.ts` and `contracts.test.ts` — `qc.ts` was the
+  last real caller of the `notImplemented()` stub-tracking helper; with QC implemented for real, both were
+  unused weight, not a "future gate" placeholder anymore.
+- **Verified live**: rebuilt and started `apps/api`; called the new routes directly over HTTP — unknown
+  project and unknown generation both return the correct `404` envelopes (`PROJECT_NOT_FOUND`/
+  `GENERATION_NOT_FOUND`) on both `/qc` and `/regenerate`, matching the automated test expectations exactly.
+  The full real chain (create → upload → analysis → generation → QC → regenerate, with a scripted fake QC
+  engine and adapter) is exercised end-to-end by `apps/api/src/generation-qc-route.test.ts` against the real
+  HTTP server. No `GEMINI_API_KEY` exists to exercise the real Gemini QC call end-to-end — same caveat as
+  every other Gemini integration in this project.
+- **Explicitly out of scope** (documented, not silently skipped): `scenario`/`references`/`conflicts` are not
+  part of QC's expected-intent context (see contract-correction note above); QC does not run automatically
+  after every render — it's a real, user-triggered "Run QC" action, matching every other AI action in this
+  codebase (analysis, reference extraction, generation) being explicitly user-initiated rather than silently
+  automatic; regeneration is not looped automatically on repeated failure — each Regenerate click is one
+  explicit VERIFY→CREATE cycle, consistent with CLAUDE.md rule 15's "no silent" principle applied to spend
+  and to user control over repeated AI calls.

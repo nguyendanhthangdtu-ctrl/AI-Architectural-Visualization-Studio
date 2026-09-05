@@ -14,7 +14,7 @@ import type {
   ViewMode,
   ViewRecord,
 } from '@avs/project-core';
-import type { ExtractedVisualLanguage, ReferencePurpose, StructuredIntelligence } from '@avs/ai-core';
+import type { ExtractedVisualLanguage, QCResult, ReferencePurpose, StructuredIntelligence } from '@avs/ai-core';
 
 /**
  * Thin fetch wrapper for apps/api — docs/03 §8. Not the shared server env
@@ -261,4 +261,44 @@ export async function getVideoStatus(projectId: string, videoId: string): Promis
   if (!res.ok) throw new ApiError(await parseErrorEnvelope(res));
   const result = (await res.json()) as VideoStatusResult;
   return { ...result, outputAssetUrl: result.outputAssetUrl ? `${API_BASE_URL}${result.outputAssetUrl}` : null };
+}
+
+export interface RunQcParams {
+  analysisId: string;
+  outputAssetId?: string;
+  locks: { id: LockId; enabled: boolean }[];
+  resolvedStyle?: string;
+  instructions?: string[];
+}
+
+export interface RunQcResult {
+  generationId: string;
+  qc: QCResult;
+}
+
+/** docs/15 AI QC (BUILD 17) — VERIFY stage; scores the generation's output against its source + expected structured intent. */
+export async function runQc(projectId: string, generationId: string, params: RunQcParams): Promise<RunQcResult> {
+  const res = await fetch(`${API_BASE_URL}/projects/${projectId}/generations/${generationId}/qc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorEnvelope(res));
+  return (await res.json()) as RunQcResult;
+}
+
+export interface RunRegenerateParams extends RunGenerationParams {
+  correctionInstruction: string;
+}
+
+/** docs/03 §4 VERIFY→CREATE loop (BUILD 17) — resubmits with the correction folded into the recompiled prompt. */
+export async function regenerate(projectId: string, generationId: string, params: RunRegenerateParams): Promise<GenerationResult> {
+  const res = await fetch(`${API_BASE_URL}/projects/${projectId}/generations/${generationId}/regenerate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new ApiError(await parseErrorEnvelope(res));
+  const result = (await res.json()) as GenerationResult;
+  return { ...result, outputAssetUrls: result.outputAssetUrls.map((url) => `${API_BASE_URL}${url}`) };
 }

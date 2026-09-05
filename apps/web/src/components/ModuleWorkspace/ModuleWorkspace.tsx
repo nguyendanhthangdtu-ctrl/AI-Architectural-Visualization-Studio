@@ -5,6 +5,7 @@ import { Workspace } from '../Workspace/Workspace.js';
 import { PrimaryAction } from '../PrimaryAction/PrimaryAction.js';
 import { EditPanel } from '../EditPanel/EditPanel.js';
 import { MultiViewPanel } from '../MultiViewPanel/MultiViewPanel.js';
+import { QCPanel } from '../QCPanel/QCPanel.js';
 import { VideoPanel } from '../VideoPanel/VideoPanel.js';
 import { ErrorState } from '../ErrorState/ErrorState.js';
 import { useProjectSessionActions, useProjectSessionState } from '../../state/ProjectSessionContext.js';
@@ -82,6 +83,7 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
         onActivate={() => void handleRender()}
       />
       {renderStatus === 'error' && renderError ? <ErrorState error={renderError} onRetry={() => void handleRender()} /> : null}
+      <QCPanel />
       <MultiViewPanel />
       <EditPanel />
       <VideoPanel />

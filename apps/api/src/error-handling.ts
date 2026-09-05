@@ -25,6 +25,8 @@ const HTTP_STATUS_BY_CODE: Readonly<Record<string, number>> = {
   EDIT_NOT_SUPPORTED: 501, // the resolved adapter has no real edit() — never silently falls back to generate()
   VIDEO_NOT_FOUND: 404,
   VEO_PROVIDER_ERROR: 502, // apps/api acting as gateway to an upstream (Google Veo) that failed
+  ANALYSIS_NOT_FOUND: 404,
+  QC_PROVIDER_ERROR: 502, // apps/api acting as gateway to an upstream (Gemini) that failed
 };
 
 export function toErrorEnvelope(error: unknown): { httpStatus: number; envelope: ErrorEnvelope } {

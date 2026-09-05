@@ -16,3 +16,4 @@ export * from './camera-intelligence.js';
 export * from './lighting-intelligence.js';
 export * from './structural-constraints.js';
 export * from './qc.js';
+export * from './gemini-qc-engine.js';

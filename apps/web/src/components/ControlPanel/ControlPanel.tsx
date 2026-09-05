@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { createDefaultLocks, type ProjectModule } from '@avs/project-core';
 import type { ErrorEnvelope, Timestamp, UserId } from '@avs/shared';
 import { resolveAutoLanguage } from '@avs/shared';
-import { reasoningEngine } from '@avs/ai-core';
-import { compilePromptOutput, selectCompleteCopyPastePrompt } from '@avs/prompt-engine';
+import { selectCompleteCopyPastePrompt } from '@avs/prompt-engine';
+import { compileNormalizedPrompt } from '../../prompt-compilation.js';
 import { UploadDropzone, type UploadDropzoneStatus } from '../UploadDropzone/UploadDropzone.js';
 import { ImagePreview } from '../ImagePreview/ImagePreview.js';
 import { ReferencePanel } from '../ReferencePanel/ReferencePanel.js';
@@ -77,7 +77,7 @@ export function ControlPanel({ module }: ControlPanelProps) {
   };
 
   const handleRemove = () => {
-    setState({ sourceImage: null, status: 'idle', locks: [], structuredIntelligence: null });
+    setState({ sourceImage: null, status: 'idle', locks: [], structuredIntelligence: null, analysisId: null });
     setUploadStatus('empty');
     setUploadError(undefined);
     setAnalysisStatus('idle');
@@ -97,6 +97,7 @@ export function ControlPanel({ module }: ControlPanelProps) {
       setState({
         currentProject: result.project,
         structuredIntelligence: result.structuredIntelligence,
+        analysisId: result.analysisId,
         locks: createDefaultLocks({
           analysisVersion: result.structuredIntelligence.analysisVersion,
           setBy: 'anonymous' as UserId, // no auth yet (BUILD 02 deferral)
@@ -119,22 +120,12 @@ export function ControlPanel({ module }: ControlPanelProps) {
     setCompileStatus('loading');
     setCompileError(undefined);
     try {
-      const normalized = await reasoningEngine.resolve({
-        structuredIntelligence: state.structuredIntelligence,
-        locks: state.locks,
-        scenario: state.scenario,
-        references: state.references.map((r) => r.extractedVisualLanguage),
-        instructions: [],
-      });
-      const analysisLanguage = resolveAutoLanguage(state.language.aiAnalysisLanguage, state.language.uiLanguage);
-      const output = await compilePromptOutput(normalized, {
-        analysisLanguage,
-        outputLanguage: state.language.promptOutputLanguage,
-      });
+      const { normalized, output } = await compileNormalizedPrompt(state);
       const outputLanguage = resolveAutoLanguage(state.language.promptOutputLanguage, state.language.uiLanguage);
       setState({
         prompt: output.compiled,
         promptOutput: output,
+        normalizedRequest: normalized,
         promptDraft: selectCompleteCopyPastePrompt(output, outputLanguage),
         status: 'ready',
       });
