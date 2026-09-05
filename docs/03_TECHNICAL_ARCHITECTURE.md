@@ -1552,3 +1552,52 @@ was introduced — this remains a zero-external-vendor deployment (§13 still op
   environment cannot supply (a real email vendor, a real managed DB/object-store/queue if the operator wants
   one instead of node:sqlite/local-disk, and — before any AI feature is trusted in production — actually
   running each provider once against a real credential).
+
+## 34. BUILD 20 Live Integration & Production Credential Validation Record
+
+Objective: move from PRODUCTION CANDIDATE to PRODUCTION READY by exercising real external integrations. No
+code was rewritten and no BUILD 18/19 behavior changed — this gate is verification-only, plus one docs update.
+No `.env` file and zero provider/database/storage/email credentials exist in this environment (confirmed by
+inspecting `process.env` directly, not assumed) — every AI-provider- and email-vendor-dependent item is
+therefore genuinely BLOCKED / EXTERNAL DEPENDENCY, not merely untested.
+
+- **What was actually exercised live** (a real `node apps/api/dist/server.js` process, started from the real
+  production build with real env vars — a file-backed `node:sqlite` database and a real local-disk asset
+  directory under a throwaway temp path, a self-generated transient `REGISTRATION_SECRET`/
+  `ASSET_URL_SIGNING_SECRET` used only for this run and deleted afterward, never committed): real
+  registration (real `scrypt` hash written to a real SQLite file), real login, a real generic
+  `INVALID_CREDENTIALS` rejection for a wrong password, real session-cookie-gated `GET /auth/me`, real
+  `POST /auth/logout` followed by confirmation the same cookie is rejected afterward (401) — real session
+  revocation, not simulated. Real project creation with a real server-derived `ownerId`. Real image upload to
+  real disk, a real signed asset URL (`?exp=...&sig=...`), retrieval producing bytes byte-identical
+  (`cmp`) to the uploaded file, rejection of the same asset id with no signature (403
+  `INVALID_ASSET_SIGNATURE`), and rejection of the *same valid signed URL* when presented under a second
+  real registered user's session (404 `ASSET_NOT_FOUND`) — real cross-user IDOR protection, live. Real
+  `GET /ready` reporting both dependencies `ok` against the real file/disk backing. Real password-reset
+  request returning the byte-identical generic response for a known vs. an unknown email, and real rate
+  limiting measured tripping at the exact configured 5/min threshold. Real security headers and real CORS
+  allow/reject observed on live response headers. Real submission of an analysis request with no
+  `GEMINI_API_KEY` configured, returning a clean, real `503 PROVIDER_NOT_CONFIGURED` with no stack trace and
+  no secret — proving the "fail safely, never fake a result" path for real, not by inspection. The server's
+  own JSON logs were scanned afterward for both transient secrets used in the run — neither appeared. The
+  process was then killed and every artifact (SQLite file, asset directory, secrets, logs) deleted; the repo
+  working tree was unaffected throughout.
+- **What remains genuinely BLOCKED / EXTERNAL DEPENDENCY** (not invented, not simulated): every one of
+  Nano Banana / ChatGPT Image / Veo / Sora / Gemini / Google Flow — no API key for any of them exists in this
+  environment, so **zero** AI provider has ever been called against its real API; a real email vendor (SMTP/
+  SES/SendGrid — none is wired at all; `EmailSender` still has only its `InMemoryEmailSender` implementation,
+  so live email delivery has no vendor to even attempt against); a real managed DB/object-store (only
+  `node:sqlite`/local-disk exist — real, not a placeholder, but not a *managed cloud* datastore either); a
+  real distributed job queue (`InMemoryJobQueue` remains the only implementation — rendering is intentionally
+  synchronous within a single request today; this is an accepted, documented design, not a BUILD 20 gap to
+  close by force-introducing a queue with nothing real to queue against).
+- **Full workspace re-verified unchanged**: 514/514 tests pass (1 correctly skipped by design), typecheck,
+  lint, and production build all clean — identical to BUILD 19's own numbers, confirming this gate introduced
+  no regression because it introduced no behavior change.
+- **Result: PRODUCTION CANDIDATE, not PRODUCTION READY.** Per this gate's own mandatory criterion ("at least
+  ONE real AI provider successfully generated a real image") and the explicit rule that a configured
+  environment variable is not proof a provider works and a mock is not a live integration: with zero
+  credentials available, no such request could be attempted, let alone claimed successful. The honest
+  distance to PRODUCTION READY is unchanged from BUILD 19's own conclusion and is entirely external:
+  one real AI provider credential exercised once, a real email vendor, and — only if the operator wants to
+  leave node:sqlite/local-disk — a real managed DB/object-store.
