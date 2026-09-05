@@ -36,10 +36,30 @@ describe('createNanoBananaAdapter', () => {
     expect(body.input[0]).toEqual({ type: 'text', text: request.promptText });
     expect(body.input[1]).toEqual({ type: 'image', data: Buffer.from([1, 2, 3, 4]).toString('base64'), mime_type: 'image/png' });
     expect(body.response_format.type).toBe('image');
+    expect(body.response_format.aspect_ratio).toBe('16:9');
+    expect(body.response_format.image_size).toBe('2K'); // BUILD 25 — request.resolution === '2K' maps 1:1
 
     expect(result.status).toBe('succeeded');
     expect(result.outputAssetUrls[0]).toBe('data:image/jpeg;base64,ZmFrZS1pbWFnZS1ieXRlcw==');
     expect(result.providerJobId).toBe('interaction-1');
+  });
+
+  it('BUILD 25: maps this app\'s own resolution vocabulary to Nano Banana 2\'s real image_size values (uppercase K, capped at 4K)', async () => {
+    const cases: [string, string][] = [
+      ['Preview', '1K'],
+      ['2K', '2K'],
+      ['4K', '4K'],
+      ['6K', '4K'],
+      ['8K/Ultra', '4K'],
+      ['', '1K'],
+    ];
+    for (const [appResolution, expectedImageSize] of cases) {
+      const fetchFn = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ output_image: { data: 'aW1n', mime_type: 'image/jpeg' } }) });
+      const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch });
+      await adapter.generate({ ...request, resolution: appResolution });
+      const body = JSON.parse(fetchFn.mock.calls[0]![1].body);
+      expect(body.response_format.image_size, `resolution "${appResolution}"`).toBe(expectedImageSize);
+    }
   });
 
   it('includes reference asset bytes after source asset bytes in the multimodal input', async () => {
@@ -55,13 +75,29 @@ describe('createNanoBananaAdapter', () => {
     expect(body.input[2]).toEqual({ type: 'image', data: Buffer.from([9, 9]).toString('base64'), mime_type: 'image/jpeg' });
   });
 
-  it('classifies a 429 rate-limit response as retryable, and BUILD 23: bounded-retries it before giving up', async () => {
+  it('classifies a genuine (non-quota) 429 rate-limit response as retryable, and BUILD 23: bounded-retries it before giving up', async () => {
     const fetchFn = vi
       .fn()
-      .mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'quota exceeded' });
+      .mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'too many requests, please slow down' });
     const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, retryBackoffMs: 1 });
     await expect(adapter.generate(request)).rejects.toMatchObject({ code: 'NANO_BANANA_PROVIDER_ERROR', retryable: true, providerCode: 'PROVIDER_RATE_LIMITED' });
     expect(fetchFn).toHaveBeenCalledTimes(2); // default maxAttempts=2 — bounded, not infinite
+  });
+
+  it('BUILD 25: classifies a 429 whose body mentions quota as PROVIDER_QUOTA_EXCEEDED and never retries it — a real Gemini response observed in this project', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      text: async () => 'You exceeded your current quota, please check your plan and billing details.',
+    });
+    const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, retryBackoffMs: 1 });
+    await expect(adapter.generate(request)).rejects.toMatchObject({
+      code: 'NANO_BANANA_PROVIDER_ERROR',
+      retryable: false,
+      providerCode: 'PROVIDER_QUOTA_EXCEEDED',
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1); // never retried — retrying an exhausted quota immediately can never succeed
   });
 
   it('BUILD 23: retries a 5xx once, then succeeds', async () => {

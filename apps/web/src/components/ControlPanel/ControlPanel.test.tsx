@@ -289,7 +289,7 @@ describe('ControlPanel', () => {
       fireEvent.change(screen.getByLabelText('Aspect Ratio'), { target: { value: '2:3' } });
       fireEvent.change(screen.getByLabelText('Generation Resolution'), { target: { value: '2K' } });
       fireEvent.change(screen.getByLabelText('Upscale Resolution'), { target: { value: '4K' } });
-      fireEvent.change(screen.getByLabelText('Render Core'), { target: { value: 'Auto' } });
+      fireEvent.change(screen.getByLabelText('AI Image Model'), { target: { value: 'Auto' } });
     }
 
     it('stays disabled until analysis and scenario are both real, then compiles a real bilingual prompt into the draft', async () => {

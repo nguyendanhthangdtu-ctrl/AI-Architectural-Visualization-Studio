@@ -22,7 +22,7 @@ function fillValidScenario() {
   fireEvent.change(screen.getByLabelText('Aspect Ratio'), { target: { value: '2:3' } });
   fireEvent.change(screen.getByLabelText('Generation Resolution'), { target: { value: '2K' } });
   fireEvent.change(screen.getByLabelText('Upscale Resolution'), { target: { value: '4K' } });
-  fireEvent.change(screen.getByLabelText('Render Core'), { target: { value: 'Auto' } });
+  fireEvent.change(screen.getByLabelText('AI Image Model'), { target: { value: 'Auto' } });
 }
 
 describe('ScenarioSlots', () => {
@@ -37,10 +37,22 @@ describe('ScenarioSlots', () => {
       'Aspect Ratio',
       'Generation Resolution',
       'Upscale Resolution',
-      'Render Core',
+      'AI Image Model',
     ]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
+  });
+
+  it('BUILD 25: defaults AI Image Model to Nano Banana 2, shown with its provider and real model id', () => {
+    renderScenarioSlots();
+    const select = screen.getByLabelText('AI Image Model') as HTMLSelectElement;
+    expect(select.value).toBe('Nano Banana');
+    expect(screen.getByRole('option', { name: 'Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)' })).toBeInTheDocument();
+  });
+
+  it('BUILD 25: never offers Google Flow as a visible AI Image Model choice — its adapter is NOT_IMPLEMENTED', () => {
+    renderScenarioSlots();
+    expect(screen.queryByRole('option', { name: /Google Flow/i })).not.toBeInTheDocument();
   });
 
   it('renders Artificial Lighting as a multi-select checkbox group, not a single select', () => {

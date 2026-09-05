@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import {
   scenarioBuilder,
+  DEFAULT_IMAGE_MODEL_RENDER_CORE,
+  findImageModelByRenderCore,
+  getEnabledImageModels,
   SCENARIO_ARTIFICIAL_LIGHTING_OPTIONS,
   SCENARIO_ASPECT_RATIOS,
   SCENARIO_CAMERA_MODES,
   SCENARIO_CONTEXTS,
   SCENARIO_ENVIRONMENTS,
   SCENARIO_LIGHTING_OPTIONS,
-  SCENARIO_RENDER_CORES,
   SCENARIO_RESOLUTIONS,
   SCENARIO_SUN_DIRECTIONS,
   type ScenarioInput,
@@ -21,8 +23,25 @@ import styles from './ScenarioSlots.module.css';
 
 type SelectFieldKey = Exclude<keyof ScenarioInput, 'artificialLighting'>;
 
+/**
+ * BUILD 25 (Multi-Model Image Engine) — "AI Image Model" only ever lists
+ * models the registry (`@avs/ai-core`'s `image-model-registry.ts`) marks
+ * `enabled: true` (never the still-`NOT_IMPLEMENTED` Google Flow), plus
+ * `Auto` — a selection strategy, not a model, always offered. `renderCore`
+ * itself still validates against the full, unchanged
+ * `SCENARIO_RENDER_CORES` vocabulary server-side (`scenario.ts`) — this only
+ * narrows what's visibly OFFERED here, never the underlying schema.
+ */
+const AI_IMAGE_MODEL_OPTIONS = [...getEnabledImageModels().map((model) => model.renderCore), 'Auto'];
+
+/** "Nano Banana" -> "Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)"; any value with no registry entry (e.g. "Auto") renders unchanged. */
+function renderCoreOptionLabel(renderCore: string): string {
+  const model = findImageModelByRenderCore(renderCore);
+  return model ? `${model.displayName} — ${model.provider === 'google-gemini' ? 'Google Gemini' : model.provider} (${model.id})` : renderCore;
+}
+
 /** docs/07_SCENARIO_BUILDER_SPEC.md enumerations — the single source of truth is packages/ai-core's scenario-vocabulary.ts. */
-const SELECT_FIELDS: { key: SelectFieldKey; label: string; options: readonly string[] }[] = [
+const SELECT_FIELDS: { key: SelectFieldKey; label: string; options: readonly string[]; getOptionLabel?: (value: string) => string }[] = [
   { key: 'context', label: 'Context', options: SCENARIO_CONTEXTS },
   { key: 'lighting', label: 'Lighting', options: SCENARIO_LIGHTING_OPTIONS },
   { key: 'sunDirection', label: 'Sun Direction', options: SCENARIO_SUN_DIRECTIONS },
@@ -31,7 +50,7 @@ const SELECT_FIELDS: { key: SelectFieldKey; label: string; options: readonly str
   { key: 'aspectRatio', label: 'Aspect Ratio', options: SCENARIO_ASPECT_RATIOS },
   { key: 'generationResolution', label: 'Generation Resolution', options: SCENARIO_RESOLUTIONS },
   { key: 'upscaleResolution', label: 'Upscale Resolution', options: SCENARIO_RESOLUTIONS },
-  { key: 'renderCore', label: 'Render Core', options: SCENARIO_RENDER_CORES },
+  { key: 'renderCore', label: 'AI Image Model', options: AI_IMAGE_MODEL_OPTIONS, getOptionLabel: renderCoreOptionLabel },
 ];
 
 const EMPTY_DRAFT: ScenarioInput = {
@@ -44,7 +63,10 @@ const EMPTY_DRAFT: ScenarioInput = {
   aspectRatio: '',
   generationResolution: '',
   upscaleResolution: '',
-  renderCore: '',
+  // BUILD 25 — Nano Banana 2 is the default AI image model, pre-selected
+  // rather than requiring the user to pick one; every other slot still
+  // starts blank.
+  renderCore: DEFAULT_IMAGE_MODEL_RENDER_CORE,
 };
 
 /**
@@ -106,7 +128,7 @@ export function ScenarioSlots() {
               <option value="">—</option>
               {field.options.map((option) => (
                 <option key={option} value={option}>
-                  {option}
+                  {field.getOptionLabel ? field.getOptionLabel(option) : option}
                 </option>
               ))}
             </select>

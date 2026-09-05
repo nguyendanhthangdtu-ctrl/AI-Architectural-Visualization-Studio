@@ -7,6 +7,7 @@ export * from './view.js';
 export * from './user-preference-application.js';
 export * from './scenario-vocabulary.js';
 export * from './scenario.js';
+export * from './image-model-registry.js';
 export * from './reference-intelligence.js';
 export * from './reference-field-vocabulary.js';
 export * from './reference-visual-language-schema.js';

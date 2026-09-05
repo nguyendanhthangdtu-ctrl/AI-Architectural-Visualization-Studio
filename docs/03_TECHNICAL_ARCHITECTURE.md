@@ -1791,3 +1791,41 @@ tests), and attempted the gated live AI generation smoke test.
   PRODUCTION READY requires a successful real live AI generation. The blocker is entirely external (no AI
   provider credential exists in this environment) — not an internal code, security, or test defect, so this is
   correctly NOT "RELEASE BLOCKED."
+
+## 39. BUILD 25 Multi-Model Image Engine / Nano Banana 2 Record
+
+Full writeup: `docs/BUILD_25_MULTI_MODEL_IMAGE_ENGINE.md`. Nano Banana 2 (`gemini-3.1-flash-image`) was
+already `nano-banana-adapter.ts`'s default model since BUILD 12 — this gate adds the model registry, output
+resolution mapping, Mock Provider, and error-taxonomy refinements around it; it did not add a new provider.
+
+- **First real model registry** (`packages/ai-core/src/image-model-registry.ts`, new) — presentation
+  metadata only (id/provider/displayName/capabilities/enabled), safe for `apps/web` (never depends on
+  `@avs/model-adapters`). `getEnabledImageModels()`/`findImageModelByRenderCore()`/
+  `DEFAULT_IMAGE_MODEL_RENDER_CORE` join back to the unchanged `SCENARIO_RENDER_CORES` vocabulary — describes
+  the existing selection mechanism, does not replace it.
+- **Real `image_size` request field, previously never sent** (`nano-banana-adapter.ts`) — mapped from this
+  app's own `SCENARIO_RESOLUTIONS` vocabulary to Nano Banana 2's real `0.5K`/`1K`/`2K`/`4K` values via
+  `mapResolutionToImageSize()`.
+- **First real, reusable Mock Provider** (`packages/model-adapters/src/mock-image-adapter.ts`, new) —
+  implements the real `ImageGenerationAdapter` interface, returns a real decodable PNG (never a placeholder
+  string), zero network calls. Deliberately not wired into production `ImageGenerationService` — test-time
+  tool only (documented scope decision, `docs/BUILD_25_MULTI_MODEL_IMAGE_ENGINE.md` §8). New
+  `apps/api/src/mock-e2e.test.ts` exercises the full real pipeline (auth → upload → analysis → generation →
+  QC → AssetStore → signed URL → round-trip → cross-user ownership rejection) with zero credentials, runs in
+  normal CI.
+- **Refined error taxonomy** (`packages/shared/src/provider-error-category.ts`) — 403 split from 401 into
+  `PROVIDER_FORBIDDEN`; new `PROVIDER_MODEL_NOT_FOUND` (404); a 429 whose body mentions "quota" now
+  classifies as `PROVIDER_QUOTA_EXCEEDED` (never retried) instead of `PROVIDER_RATE_LIMITED` (retried) —
+  directly informed by the real Gemini 429 ("exceeded your current quota...") observed during BUILD 24's
+  live-credential exercise. No existing test asserted 401-vs-403/404 behavior, so this was a safe, additive
+  refinement.
+- **UI model selector** (`ScenarioSlots.tsx`) — the renderCore slot (relabeled "AI Image Model") now defaults
+  to Nano Banana 2 (previously blank, like every other slot) and shows real provider/model-id metadata per
+  option (`"Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)"`); Google Flow (still `NOT_IMPLEMENTED`)
+  is no longer offered as a visible choice, though its schema/adapter registration is unchanged.
+- **592/592 tests pass, 3 correctly skipped** (was 569/3 at the end of BUILD 24 — +23 new tests); typecheck,
+  lint, and production build all clean; built `apps/web` bundle re-grepped for every provider key/header name
+  — zero matches.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED.** No live Gemini call was made in this gate
+  (per its own instruction not to spend real quota unless explicitly required); the Mock E2E proves the full
+  pipeline is wired correctly, which is not the same as a verified live generation.

@@ -27,6 +27,18 @@ import type {
  * already used by Vision Analysis (BUILD 07) and Reference Intelligence
  * (BUILD 10), with `response_format.type: "image"` instead of JSON/text.
  *
+ * BUILD 25 (Multi-Model Image Engine / Nano Banana 2) — this adapter's
+ * default model was already `gemini-3.1-flash-image` ("Nano Banana 2",
+ * Google's own current general-purpose image model) since BUILD 12; this
+ * gate adds the previously-missing real `image_size` request field (only
+ * `aspect_ratio` was ever sent) and its mapping from this app's own
+ * resolution vocabulary (`SCENARIO_RESOLUTIONS`,
+ * `packages/ai-core/src/scenario-vocabulary.ts`) to the four real values
+ * Nano Banana 2's docs confirm: `0.5K`/`1K`/`2K`/`4K` — see
+ * `mapResolutionToImageSize()`. Registered in
+ * `packages/ai-core/src/image-model-registry.ts` as the app's default image
+ * model.
+ *
  * IMPORTANT: no NANO_BANANA_API_KEY was available at implementation time —
  * this has been validated against current documentation but NOT exercised
  * against the real API. Treat live behavior as unverified until a key is
@@ -34,6 +46,23 @@ import type {
  */
 const GEMINI_INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_MODEL = 'gemini-3.1-flash-image'; // "Nano Banana 2" — current general-purpose image model at implementation time
+
+/**
+ * BUILD 25 — maps this app's own resolution vocabulary
+ * (`SCENARIO_RESOLUTIONS`) to Nano Banana 2's real, documented `image_size`
+ * values (uppercase `K`, per current docs). Never invents a resolution the
+ * app doesn't already offer, and never sends anything outside Nano Banana
+ * 2's own confirmed set. `'Preview'` maps to the model's baseline `'1K'`
+ * (the registry's own default, `image-model-registry.ts`); `'6K'`/`'8K/Ultra'`
+ * — resolutions this app offers for OTHER render cores (e.g. ChatGPT Image)
+ * — are capped at Nano Banana 2's real maximum, `'4K'`, rather than sent
+ * unmapped and rejected by the provider.
+ */
+function mapResolutionToImageSize(resolution: string): '0.5K' | '1K' | '2K' | '4K' {
+  if (resolution === '2K') return '2K';
+  if (resolution === '4K' || resolution === '6K' || resolution === '8K/Ultra') return '4K';
+  return '1K'; // 'Preview', empty, or anything unrecognized — the registry's own documented default
+}
 
 export interface NanoBananaAdapterConfig {
   apiKey: string | undefined;
@@ -69,7 +98,10 @@ function isRetryableGenerationFailure(error: unknown): boolean {
 }
 
 function classifyGeminiError(status: number, message: string): NormalizedAdapterError {
-  const { category, retryable } = classifyProviderHttpStatus(status);
+  // BUILD 25 — the raw message is passed through (before sanitization) so a
+  // real quota/billing 429 can be distinguished from a genuine rate-limit
+  // 429; only the sanitized copy ever reaches the client-facing message.
+  const { category, retryable } = classifyProviderHttpStatus(status, message);
   return {
     code: 'NANO_BANANA_PROVIDER_ERROR',
     message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`,
@@ -89,7 +121,7 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
   const maxAttempts = config.maxAttempts ?? 2;
   const retryBackoffMs = config.retryBackoffMs ?? 300;
 
-  async function callInteractionsApi(input: unknown[], aspectRatio: string, requestId: string): Promise<GenerationResult> {
+  async function callInteractionsApi(input: unknown[], aspectRatio: string, resolution: string, requestId: string): Promise<GenerationResult> {
     if (!config.apiKey) {
       throw new DomainError({
         code: 'PROVIDER_NOT_CONFIGURED',
@@ -101,7 +133,12 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
     const requestBody = {
       model,
       input,
-      response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: aspectRatio },
+      response_format: {
+        type: 'image',
+        mime_type: 'image/jpeg',
+        aspect_ratio: aspectRatio,
+        image_size: mapResolutionToImageSize(resolution),
+      },
     };
 
     return withBoundedRetry(
@@ -159,8 +196,8 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
 
     capabilities(): AdapterCapabilities {
       return {
-        // Conservative — only what current docs confirmed at implementation time (image_size "1K" example seen); not asserting higher tiers unverified.
-        maxResolution: '1K',
+        // BUILD 25 — Nano Banana 2's real, documented image_size ceiling (see mapResolutionToImageSize() above).
+        maxResolution: '4K',
         supportedAspectRatios: ['1:1', '16:9', '9:16'],
         // Multimodal input (source/reference images + text) in one call is genuinely edit-like for this model family —
         // see edit()'s doc comment for the real limitation (no true pixel mask, unlike ChatGPTImageAdapter).
@@ -182,7 +219,7 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
         ...request.sourceAssets.map(toImagePart),
         ...request.referenceAssets.map(toImagePart),
       ];
-      return callInteractionsApi(input, request.aspectRatio, request.requestId);
+      return callInteractionsApi(input, request.aspectRatio, request.resolution, request.requestId);
     },
 
     /**
@@ -205,7 +242,7 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
         toImagePart(request.sourceAsset),
         ...(request.maskAsset ? [toImagePart(request.maskAsset)] : []),
       ];
-      return callInteractionsApi(input, request.aspectRatio, request.requestId);
+      return callInteractionsApi(input, request.aspectRatio, request.resolution, request.requestId);
     },
 
     normalizeError(providerError: unknown): NormalizedAdapterError {

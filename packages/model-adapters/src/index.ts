@@ -5,6 +5,7 @@ export * from './future-adapter.js';
 export * from './provider-adapters.js';
 export * from './nano-banana-adapter.js';
 export * from './chatgpt-image-adapter.js';
+export * from './mock-image-adapter.js';
 export * from './video-types.js';
 export * from './video-adapter.js';
 export * from './video-service.js';
