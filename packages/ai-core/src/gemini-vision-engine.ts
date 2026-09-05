@@ -1,6 +1,6 @@
 import type { ProjectModule } from '@avs/project-core';
 import { describeArchitectureModule, describeInteriorModule } from '@avs/project-core';
-import { DomainError } from '@avs/shared';
+import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
 import { LAYER_NAMES, structuredIntelligenceLayersSchema } from './structured-intelligence-schema.js';
 import type { SourceAssetRef, StructuredIntelligence, VisionAnalysisEngine } from './vision-analysis.js';
 
@@ -214,7 +214,7 @@ function classifyGeminiError(status: number, message: string): DomainError {
   const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
   return new DomainError({
     code: 'VISION_PROVIDER_ERROR',
-    message: `Gemini API error (${status}): ${message}`,
+    message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`,
     retryable,
   });
 }

@@ -1,4 +1,4 @@
-import { DomainError } from '@avs/shared';
+import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 import type {
   AdapterCapabilities,
@@ -36,7 +36,7 @@ export interface NanoBananaAdapterConfig {
 
 function classifyGeminiError(status: number, message: string): NormalizedAdapterError {
   const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
-  return { code: 'NANO_BANANA_PROVIDER_ERROR', message: `Gemini API error (${status}): ${message}`, retryable };
+  return { code: 'NANO_BANANA_PROVIDER_ERROR', message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`, retryable };
 }
 
 function toImagePart(img: { data: Uint8Array; contentType: string }) {

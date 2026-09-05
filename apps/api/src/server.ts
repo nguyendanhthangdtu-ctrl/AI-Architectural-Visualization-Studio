@@ -1,11 +1,13 @@
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import { createConsoleLogger, DomainError, parseServerEnv } from '@avs/shared';
+import { createConsoleLogger, createInMemoryMetrics, DomainError, parseServerEnv } from '@avs/shared';
 import { sendError } from './error-handling.js';
-import { applyCorsHeaders } from './cors.js';
+import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
+import { enforceRateLimit } from './rate-limit-middleware.js';
 import { createAppContext, type AppContext } from './app-context.js';
 import {
   handleCreateProject,
+  handleDeleteAsset,
   handleExtractReference,
   handleGetAsset,
   handleGetProject,
@@ -31,23 +33,37 @@ const PROJECT_GENERATION_QC_ROUTE = /^\/projects\/([^/]+)\/generations\/([^/]+)\
 const PROJECT_GENERATION_REGENERATE_ROUTE = /^\/projects\/([^/]+)\/generations\/([^/]+)\/regenerate$/;
 const PROJECT_VIEWS_ROUTE = /^\/projects\/([^/]+)\/views$/;
 const PROJECT_VIDEO_ID_ROUTE = /^\/projects\/([^/]+)\/videos\/([^/]+)$/;
+const PROJECT_ASSET_ID_ROUTE = /^\/projects\/([^/]+)\/assets\/([^/]+)$/;
 const ASSET_ID_ROUTE = /^\/assets\/([^/]+)$/;
 
 /**
  * apps/api HTTP server — docs/03 §8. Routes land here as the Build Gate that
- * owns each capability builds it (BUILD 06 adds project creation and asset
- * upload; BUILD 07 adds analysis; everything else is still NOT_IMPLEMENTED
- * contracts elsewhere).
+ * owns each capability builds it.
+ *
+ * `allowedOrigins` (BUILD 18, docs/16) is threaded through explicitly rather
+ * than read from `process.env` inside `createApp` — keeps this function pure
+ * given its inputs, same reasoning as `context`/`logger` already being
+ * parameters, and lets tests exercise a specific allowlist without mutating
+ * global environment state.
  */
-export function createApp(context: AppContext = createAppContext(), logger = createConsoleLogger()) {
+export function createApp(
+  context: AppContext = createAppContext(),
+  logger = createConsoleLogger(),
+  allowedOrigins: readonly string[] = parseAllowedOrigins(undefined),
+  metrics = createInMemoryMetrics(),
+) {
   return createServer((req, res) => {
-    applyCorsHeaders(res);
+    applyCorsHeaders(req, res, allowedOrigins);
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
+
+    res.on('finish', () => {
+      metrics.increment('http_requests_total', { method: req.method ?? 'UNKNOWN', status: String(res.statusCode) });
+    });
 
     void (async () => {
       try {
@@ -57,6 +73,12 @@ export function createApp(context: AppContext = createAppContext(), logger = cre
         if (req.method === 'GET' && path === '/health') {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ status: 'ok' }));
+          return;
+        }
+
+        if (req.method === 'GET' && path === '/metrics') {
+          res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' });
+          res.end(metrics.render());
           return;
         }
 
@@ -73,24 +95,28 @@ export function createApp(context: AppContext = createAppContext(), logger = cre
 
         const projectAnalysisMatch = path.match(PROJECT_ANALYSIS_ROUTE);
         if (req.method === 'POST' && projectAnalysisMatch) {
+          enforceRateLimit(context, req);
           await handleRunAnalysis(req, res, context, projectAnalysisMatch[1]!);
           return;
         }
 
         const projectReferencesMatch = path.match(PROJECT_REFERENCES_ROUTE);
         if (req.method === 'POST' && projectReferencesMatch) {
+          enforceRateLimit(context, req);
           await handleExtractReference(req, res, context, projectReferencesMatch[1]!);
           return;
         }
 
         const projectGenerationEditsMatch = path.match(PROJECT_GENERATION_EDITS_ROUTE);
         if (req.method === 'POST' && projectGenerationEditsMatch) {
+          enforceRateLimit(context, req);
           await handleRunEdit(req, res, context, projectGenerationEditsMatch[1]!, projectGenerationEditsMatch[2]!);
           return;
         }
 
         const projectGenerationVideosMatch = path.match(PROJECT_GENERATION_VIDEOS_ROUTE);
         if (req.method === 'POST' && projectGenerationVideosMatch) {
+          enforceRateLimit(context, req);
           await handleRunVideo(req, res, context, projectGenerationVideosMatch[1]!, projectGenerationVideosMatch[2]!);
           return;
         }
@@ -103,25 +129,35 @@ export function createApp(context: AppContext = createAppContext(), logger = cre
 
         const projectGenerationQcMatch = path.match(PROJECT_GENERATION_QC_ROUTE);
         if (req.method === 'POST' && projectGenerationQcMatch) {
+          enforceRateLimit(context, req);
           await handleRunQc(req, res, context, projectGenerationQcMatch[1]!, projectGenerationQcMatch[2]!);
           return;
         }
 
         const projectGenerationRegenerateMatch = path.match(PROJECT_GENERATION_REGENERATE_ROUTE);
         if (req.method === 'POST' && projectGenerationRegenerateMatch) {
+          enforceRateLimit(context, req);
           await handleRegenerate(req, res, context, projectGenerationRegenerateMatch[1]!, projectGenerationRegenerateMatch[2]!);
           return;
         }
 
         const projectGenerationsMatch = path.match(PROJECT_GENERATIONS_ROUTE);
         if (req.method === 'POST' && projectGenerationsMatch) {
+          enforceRateLimit(context, req);
           await handleRunGeneration(req, res, context, projectGenerationsMatch[1]!);
           return;
         }
 
         const projectViewsMatch = path.match(PROJECT_VIEWS_ROUTE);
         if (req.method === 'POST' && projectViewsMatch) {
+          enforceRateLimit(context, req);
           await handleRunView(req, res, context, projectViewsMatch[1]!);
+          return;
+        }
+
+        const projectAssetIdMatch = path.match(PROJECT_ASSET_ID_ROUTE);
+        if (req.method === 'DELETE' && projectAssetIdMatch) {
+          await handleDeleteAsset(res, context, projectAssetIdMatch[1]!, projectAssetIdMatch[2]!);
           return;
         }
 
@@ -133,7 +169,7 @@ export function createApp(context: AppContext = createAppContext(), logger = cre
 
         const assetIdMatch = path.match(ASSET_ID_ROUTE);
         if (req.method === 'GET' && assetIdMatch) {
-          await handleGetAsset(res, context, assetIdMatch[1]!);
+          await handleGetAsset(req, res, context, assetIdMatch[1]!);
           return;
         }
 
@@ -159,8 +195,12 @@ if (isMainModule) {
       nanoBananaApiKey: env.NANO_BANANA_API_KEY,
       chatgptImageApiKey: env.CHATGPT_IMAGE_API_KEY,
       veoApiKey: env.VEO_API_KEY,
+      dbPath: env.DATABASE_URL,
+      assetsDir: env.ASSET_STORE_URL,
+      assetUrlSigningSecret: env.ASSET_URL_SIGNING_SECRET,
     }),
     logger,
+    parseAllowedOrigins(env.ALLOWED_ORIGINS),
   ).listen(env.API_PORT, () => {
     logger.info(`apps/api listening on :${env.API_PORT}`);
   });

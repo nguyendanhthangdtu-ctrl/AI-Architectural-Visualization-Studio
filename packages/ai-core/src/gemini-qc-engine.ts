@@ -1,5 +1,5 @@
 import type { LockId } from '@avs/project-core';
-import { DomainError } from '@avs/shared';
+import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { AiQc, QCIssue, QCResult, QCScores, QcNormalizedRequestContext } from './qc.js';
 
 /**
@@ -133,7 +133,7 @@ function classifyGeminiError(status: number, message: string): DomainError {
   const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
   return new DomainError({
     code: 'QC_PROVIDER_ERROR',
-    message: `Gemini API error (${status}): ${message}`,
+    message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`,
     retryable,
   });
 }

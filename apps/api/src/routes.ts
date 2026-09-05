@@ -39,6 +39,7 @@ import {
 } from './schemas.js';
 import { readBody } from './read-body.js';
 import { validateUpload, MAX_UPLOAD_SIZE_BYTES } from './upload-validation.js';
+import { buildAssetUrl } from './signed-asset-url.js';
 
 const MAX_JSON_BODY_BYTES = 10 * 1024; // project create/update payloads are small, fixed-shape JSON
 const MAX_GENERATION_BODY_BYTES = 50 * 1024; // a compiled master prompt + reference id list is larger than other JSON bodies here
@@ -112,7 +113,12 @@ export async function handleUploadAsset(
   validateUpload({ contentType, sizeBytes: data.length, data });
 
   const ref = await context.assetStore.put({ projectId: projectId as ProjectId, contentType: contentType!, data });
-  sendJson(res, 201, { id: ref.id, url: `/assets/${ref.id}`, contentType: ref.contentType, sizeBytes: ref.sizeBytes });
+  sendJson(res, 201, {
+    id: ref.id,
+    url: buildAssetUrl(context.assetUrlSigner, ref.id),
+    contentType: ref.contentType,
+    sizeBytes: ref.sizeBytes,
+  });
 }
 
 /**
@@ -466,7 +472,7 @@ export async function handleRunGeneration(
     versionId: version.id,
     project: updatedProject,
     generation: generationRecord,
-    outputAssetUrls: outputAssets.map((a) => `/assets/${a.id}`),
+    outputAssetUrls: outputAssets.map((a) => buildAssetUrl(context.assetUrlSigner, a.id)),
   });
 }
 
@@ -666,13 +672,23 @@ export async function handleRegenerate(
     updatedAt: now as Timestamp,
   });
 
+  await context.auditLogRepository.record({
+    id: randomUUID(),
+    action: 'generation.regenerate',
+    actorId: 'anonymous', // no auth yet (BUILD 02 deferral)
+    projectId: project.id,
+    targetId: generationRecord.id,
+    metadata: { regeneratedFromGenerationId: failedGeneration.id, correctionInstruction: result.data.correctionInstruction },
+    createdAt: now,
+  });
+
   sendJson(res, 201, {
     jobId: job.id,
     generationId: generationRecord.id,
     versionId: version.id,
     project: updatedProject,
     generation: generationRecord,
-    outputAssetUrls: outputAssets.map((a) => `/assets/${a.id}`),
+    outputAssetUrls: outputAssets.map((a) => buildAssetUrl(context.assetUrlSigner, a.id)),
   });
 }
 
@@ -789,7 +805,7 @@ export async function handleRunView(
     project: updatedProject,
     view: viewRecord,
     generation: generationRecord,
-    outputAssetUrls: outputAssets.map((a) => `/assets/${a.id}`),
+    outputAssetUrls: outputAssets.map((a) => buildAssetUrl(context.assetUrlSigner, a.id)),
   });
 }
 
@@ -954,7 +970,7 @@ export async function handleRunEdit(
     versionId: version.id,
     project: updatedProject,
     edit: editRecord,
-    outputAssetUrls: outputAssets.map((a) => `/assets/${a.id}`),
+    outputAssetUrls: outputAssets.map((a) => buildAssetUrl(context.assetUrlSigner, a.id)),
   });
 }
 
@@ -1104,7 +1120,10 @@ export async function handleGetVideoStatus(
   }
 
   if (video.status !== 'running' || !video.providerOperationName) {
-    sendJson(res, 200, { video, outputAssetUrl: video.resultingAssetId ? `/assets/${video.resultingAssetId}` : null });
+    sendJson(res, 200, {
+      video,
+      outputAssetUrl: video.resultingAssetId ? buildAssetUrl(context.assetUrlSigner, video.resultingAssetId) : null,
+    });
     return;
   }
 
@@ -1147,14 +1166,90 @@ export async function handleGetVideoStatus(
     updatedAt: now,
   });
 
-  sendJson(res, 200, { video: updated, outputAssetUrl: `/assets/${outputAsset.id}` });
+  sendJson(res, 200, { video: updated, outputAssetUrl: buildAssetUrl(context.assetUrlSigner, outputAsset.id) });
 }
 
-export async function handleGetAsset(res: ServerResponse, context: AppContext, assetId: string): Promise<void> {
+/**
+ * docs/03 §9 "signed, time-limited URLs... no public bucket by default" +
+ * "Audit log ... for asset access grants" (BUILD 18). Signature/expiry
+ * verification only runs when `context.assetUrlSigner` is configured — same
+ * graceful-degradation as every optional secret in this codebase (unset,
+ * this stays exactly the plain unauthenticated fetch it always was).
+ */
+export async function handleGetAsset(
+  req: IncomingMessage,
+  res: ServerResponse,
+  context: AppContext,
+  assetId: string,
+): Promise<void> {
   const found = await context.assetStore.get(assetId as AssetId);
   if (!found) {
     throw new DomainError({ code: 'ASSET_NOT_FOUND', message: `No asset with id ${assetId}`, retryable: false });
   }
+
+  if (context.assetUrlSigner) {
+    const requestUrl = new URL(req.url ?? '', 'http://internal');
+    const expiresAt = Number(requestUrl.searchParams.get('exp'));
+    const signature = requestUrl.searchParams.get('sig') ?? '';
+    if (!context.assetUrlSigner.verify(assetId, expiresAt, signature)) {
+      throw new DomainError({
+        code: 'INVALID_ASSET_SIGNATURE',
+        message: 'Asset URL signature is missing, invalid, or expired.',
+        retryable: false,
+      });
+    }
+  }
+
+  await context.auditLogRepository.record({
+    id: randomUUID(),
+    action: 'asset.access',
+    actorId: 'anonymous', // no auth yet (BUILD 02 deferral)
+    projectId: found.ref.projectId,
+    targetId: assetId,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+  });
+
   res.writeHead(200, { 'content-type': found.ref.contentType, 'content-length': found.data.byteLength });
   res.end(Buffer.from(found.data));
+}
+
+/**
+ * docs/16_SECURITY_SPEC.md "Define retention/deletion policy for user
+ * assets" (BUILD 18) — `AssetStore.scheduleDeletion()` existed since BUILD
+ * 02 but no route ever called it. Real, on-demand deletion; the exact
+ * *automatic* retention timeframe (delete after N days unused, etc.) stays
+ * the documented product/legal decision docs/03 §13 already flags it as —
+ * this makes the interface point actually reachable, not more than that.
+ */
+export async function handleDeleteAsset(
+  res: ServerResponse,
+  context: AppContext,
+  projectId: string,
+  assetId: string,
+): Promise<void> {
+  const project = await context.projectRepository.getById(projectId as ProjectId);
+  if (!project) {
+    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
+  }
+
+  const found = await context.assetStore.get(assetId as AssetId);
+  if (!found || found.ref.projectId !== project.id) {
+    throw new DomainError({ code: 'ASSET_NOT_FOUND', message: `No asset with id ${assetId} on project ${projectId}`, retryable: false });
+  }
+
+  await context.assetStore.scheduleDeletion(assetId as AssetId);
+
+  await context.auditLogRepository.record({
+    id: randomUUID(),
+    action: 'asset.delete',
+    actorId: 'anonymous', // no auth yet (BUILD 02 deferral)
+    projectId: project.id,
+    targetId: assetId,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+  });
+
+  res.writeHead(204);
+  res.end();
 }

@@ -19,7 +19,13 @@ describe('parseServerEnv', () => {
 
   it('lists every credential field as a secret to redact from logs', () => {
     expect(SECRET_ENV_KEYS).toEqual(
-      expect.arrayContaining(['NANO_BANANA_API_KEY', 'GOOGLE_FLOW_API_KEY', 'CHATGPT_IMAGE_API_KEY', 'DATABASE_URL']),
+      expect.arrayContaining([
+        'NANO_BANANA_API_KEY',
+        'GOOGLE_FLOW_API_KEY',
+        'CHATGPT_IMAGE_API_KEY',
+        'DATABASE_URL',
+        'ASSET_URL_SIGNING_SECRET',
+      ]),
     );
   });
 });

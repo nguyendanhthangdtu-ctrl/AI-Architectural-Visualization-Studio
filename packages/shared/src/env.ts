@@ -36,11 +36,31 @@ const serverEnvSchema = z.object({
   // PROVIDER_NOT_CONFIGURED error rather than the server failing to start.
   GEMINI_API_KEY: z.string().optional(),
 
-  // Storage credentials (docs/03 ADR-005; vendor TBD)
+  // Storage — BUILD 18: resolved to concrete, zero-external-vendor engines.
+  // DATABASE_URL is a filesystem path node:sqlite's DatabaseSync opens directly
+  // (or ':memory:' for an ephemeral instance); ASSET_STORE_URL is the local
+  // directory asset bytes are written under. A real cloud DB/blob vendor swap
+  // (docs/03 §13) still only needs new implementations behind the same
+  // repository/AssetStore interfaces — never a caller-visible change.
+  // ASSET_STORE_ACCESS_KEY/ASSET_STORE_SECRET_KEY stay unused until that swap.
   DATABASE_URL: z.string().optional(),
   ASSET_STORE_URL: z.string().optional(),
   ASSET_STORE_ACCESS_KEY: z.string().optional(),
   ASSET_STORE_SECRET_KEY: z.string().optional(),
+
+  // CORS allowlist (docs/16, BUILD 18) — comma-separated origins; defaults to
+  // the Vite dev server's own origin when unset (cors.ts).
+  ALLOWED_ORIGINS: z.string().optional(),
+
+  // Signs the time-limited asset URLs `GET /assets/:id` can require (BUILD
+  // 18) — docs/03 §9 "signed, time-limited URLs from AssetStore — no public
+  // bucket by default." Optional so local dev/tests never need a secret to
+  // start (BUILD 02 acceptance criterion), same graceful-degradation pattern
+  // as every provider key above: unset, asset URLs stay plain and
+  // unauthenticated (today's behavior, unchanged); set, every asset URL this
+  // API returns is signed and `GET /assets/:id` enforces the signature +
+  // expiry for real.
+  ASSET_URL_SIGNING_SECRET: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -56,6 +76,7 @@ export const SECRET_ENV_KEYS: readonly (keyof ServerEnv)[] = [
   'DATABASE_URL',
   'ASSET_STORE_ACCESS_KEY',
   'ASSET_STORE_SECRET_KEY',
+  'ASSET_URL_SIGNING_SECRET',
 ];
 
 /**

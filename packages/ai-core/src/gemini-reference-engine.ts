@@ -1,4 +1,4 @@
-import { DomainError } from '@avs/shared';
+import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
 import { fieldKeysForPurpose, filterFieldsForPurpose } from './reference-field-vocabulary.js';
 import { referenceVisualLanguageResponseSchema } from './reference-visual-language-schema.js';
 import type {
@@ -109,7 +109,7 @@ function classifyGeminiError(status: number, message: string): DomainError {
   const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
   return new DomainError({
     code: 'REFERENCE_PROVIDER_ERROR',
-    message: `Gemini API error (${status}): ${message}`,
+    message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`,
     retryable,
   });
 }

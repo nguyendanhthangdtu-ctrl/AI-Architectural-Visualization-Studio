@@ -123,13 +123,19 @@ describe('apps/api project + asset routes (BUILD 06 Image Ingestion)', () => {
     await expect(res.json()).resolves.toMatchObject({ code: 'ASSET_NOT_FOUND' });
   });
 
-  it('answers CORS preflight requests and sets CORS headers on real responses', async () => {
+  it('answers CORS preflight requests and reflects an allowlisted origin, but not an unlisted one (BUILD 18)', async () => {
     await start();
-    const preflight = await fetch(`${baseUrl}/projects`, { method: 'OPTIONS' });
+    const preflight = await fetch(`${baseUrl}/projects`, {
+      method: 'OPTIONS',
+      headers: { origin: 'http://localhost:5173' },
+    });
     expect(preflight.status).toBe(204);
-    expect(preflight.headers.get('access-control-allow-origin')).toBe('*');
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
 
-    const res = await fetch(`${baseUrl}/health`);
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    const res = await fetch(`${baseUrl}/health`, { headers: { origin: 'http://localhost:5173' } });
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+
+    const untrusted = await fetch(`${baseUrl}/health`, { headers: { origin: 'https://evil.example' } });
+    expect(untrusted.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

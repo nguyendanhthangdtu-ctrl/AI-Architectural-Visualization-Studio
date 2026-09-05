@@ -9,7 +9,7 @@ import {
 } from '@avs/ai-core';
 import { promptCompiler } from '@avs/prompt-engine';
 import { ImageGenerationService, FutureAdapter } from '@avs/model-adapters';
-import { InMemoryProjectRepository } from '@avs/storage-adapters';
+import { SqliteDatabase, SqliteProjectRepository } from '@avs/storage-adapters';
 import { DomainError, parseServerEnv } from '@avs/shared';
 
 /**
@@ -41,8 +41,9 @@ describe('BUILD 02 smoke test', () => {
     expect(service.resolve('auto')).toBeInstanceOf(FutureAdapter);
   });
 
-  it('loads the in-memory storage reference implementation from @avs/storage-adapters', () => {
-    expect(new InMemoryProjectRepository()).toBeInstanceOf(InMemoryProjectRepository);
+  it('loads the real, node:sqlite-backed storage reference implementation from @avs/storage-adapters (BUILD 18)', () => {
+    const repo = new SqliteProjectRepository(new SqliteDatabase(':memory:'));
+    expect(repo).toBeInstanceOf(SqliteProjectRepository);
   });
 
   it('validates an empty environment without requiring any secret', () => {

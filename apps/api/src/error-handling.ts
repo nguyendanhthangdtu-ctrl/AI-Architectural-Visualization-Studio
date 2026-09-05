@@ -27,6 +27,8 @@ const HTTP_STATUS_BY_CODE: Readonly<Record<string, number>> = {
   VEO_PROVIDER_ERROR: 502, // apps/api acting as gateway to an upstream (Google Veo) that failed
   ANALYSIS_NOT_FOUND: 404,
   QC_PROVIDER_ERROR: 502, // apps/api acting as gateway to an upstream (Gemini) that failed
+  INVALID_ASSET_SIGNATURE: 403, // signed asset URL missing/invalid/expired (docs/03 §9, BUILD 18)
+  RATE_LIMITED: 429, // docs/16 "Rate limit expensive AI endpoints" (BUILD 18)
 };
 
 export function toErrorEnvelope(error: unknown): { httpStatus: number; envelope: ErrorEnvelope } {

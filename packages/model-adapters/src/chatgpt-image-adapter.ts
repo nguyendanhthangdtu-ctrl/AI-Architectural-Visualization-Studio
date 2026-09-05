@@ -1,4 +1,4 @@
-import { DomainError } from '@avs/shared';
+import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 import type {
   AdapterCapabilities,
@@ -57,7 +57,11 @@ function mapResolutionToQuality(resolution: string): 'low' | 'medium' | 'high' |
 
 function classifyOpenAiError(status: number, message: string): NormalizedAdapterError {
   const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
-  return { code: 'CHATGPT_IMAGE_PROVIDER_ERROR', message: `OpenAI Images API error (${status}): ${message}`, retryable };
+  return {
+    code: 'CHATGPT_IMAGE_PROVIDER_ERROR',
+    message: `OpenAI Images API error (${status}): ${sanitizeProviderErrorBody(message)}`,
+    retryable,
+  };
 }
 
 export function createChatGPTImageAdapter(config: ChatGPTImageAdapterConfig): ImageGenerationAdapter {

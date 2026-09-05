@@ -383,17 +383,27 @@ Maps docs/17 Test Strategy onto the module boundaries defined above:
 
 Explicitly deferred — not ambiguous, just not yet due:
 
-- Concrete cloud/hosting provider and IaC tooling (BUILD 02 / BUILD 18).
-- Concrete relational database engine and blob storage vendor (BUILD 02), building on ADR-005's
-  recommendation.
-- Concrete job queue technology behind the `JobQueue` interface (BUILD 02, ADR-004).
-- Concrete auth provider/strategy and session model (BUILD 02 / BUILD 03).
+- **Resolved at BUILD 18**: concrete relational database engine and blob storage — `node:sqlite`
+  (`SqliteDatabase`) and local disk (`LocalDiskAssetStore`), both real and zero-external-vendor (§30/§31).
+  A managed cloud swap (Postgres/S3/etc.) stays a real, still-open future decision, but only behind these
+  same repository/`AssetStore` interfaces — no caller-visible change if/when it happens.
+- Concrete cloud/hosting provider and IaC tooling — still open (no account/credentials to wire against).
+- Concrete job queue technology behind the `JobQueue` interface (still `InMemoryJobQueue`, single-process
+  only) — still open; a real multi-instance deployment needs a shared backend (Redis/SQS/etc.).
+- Concrete auth provider/strategy and session model — still fully absent (BUILD 18 audit reconfirmed zero
+  auth exists anywhere); still open.
 - Exact request/response schemas for NanoBanana, Google Flow, and ChatGPT Image adapters — validated
   against each provider's current official documentation at BUILD 12, not fabricated in this document.
-- Concrete observability vendor/stack (BUILD 02 / BUILD 18).
-- Exact retention/deletion policy timeframes for user assets (docs/16) — a product/legal decision.
+- Concrete observability vendor/stack — BUILD 18 added vendor-agnostic HTTP-request counters
+  (`GET /metrics`, Prometheus text format); a managed backend (Datadog/Grafana/etc.) and latency
+  histograms/tracing stay open.
+- Exact *automatic* retention/deletion policy timeframes for user assets (docs/16) — a product/legal
+  decision, still open; BUILD 18 made on-demand deletion itself real (`DELETE /projects/:id/assets/:assetId`).
 - UX mechanics for the Style/Lighting Lock "keep this look?" auto-suggest moment (BUILD 03 / BUILD 09).
 - Interactive version-tree UI (Post-MVP, docs/01) built on top of the MVP-level `GenerationVersion` DAG.
+- `PATCH /projects/:id/locks` — locks are still resolved entirely client-side; no server-side lock
+  persistence/audit exists (a pre-existing gap since BUILD 02, reconfirmed still open at BUILD 18 when the
+  audit log was added — lock changes are the one docs/03 §9 audit category this gate could not cover).
 
 ---
 
@@ -1281,3 +1291,91 @@ docs/03 §4 step 5 describes.
   automatic; regeneration is not looped automatically on repeated failure — each Regenerate click is one
   explicit VERIFY→CREATE cycle, consistent with CLAUDE.md rule 15's "no silent" principle applied to spend
   and to user control over repeated AI calls.
+
+## 31. BUILD 18 Production Hardening Implementation Record
+
+Closes the real gaps a pre-gate audit found across docs/16/§9/§12/§13: rate limiting, an audit log, CORS,
+signed asset URLs, and a raw-provider-error leak had **zero** implementation until this gate, despite being
+named since Bootstrap. Scope, per the product owner's explicit choice between three tiers: code-level
+hardening **plus** real local persistence — not the six vendor decisions §13 also names (cloud host, managed
+DB, managed blob store, managed queue, auth provider, observability backend), which stay open, documented
+decisions, not fabricated integrations (CLAUDE.md rule 7).
+
+- **Real gap found and closed: provider error bodies leaked unredacted into logs AND client responses.**
+  Every adapter/engine (`gemini-vision-engine.ts`, `gemini-reference-engine.ts`, `gemini-qc-engine.ts`,
+  `nano-banana-adapter.ts`, `chatgpt-image-adapter.ts`, `veo-adapter.ts`) built its `DomainError.message` by
+  interpolating the raw upstream HTTP response body — that string reaches both the structured log (which
+  only redacts by known object-key name, not arbitrary text) and the client-facing `ErrorEnvelope`. New
+  `sanitizeProviderErrorBody()` (`packages/shared`) truncates to a bounded length and strips long
+  opaque-token-shaped substrings (a heuristic, not an exhaustive scanner — documented as such); wired into
+  all 8 call sites across the 6 files.
+- **Rate limiting** (`packages/shared/src/rate-limiter.ts`, `apps/api/src/rate-limit-middleware.ts`) — an
+  in-memory, single-instance fixed-window limiter (real, load-bearing for one process — same "concrete
+  engine deferred, contract real now" pattern as `JobQueue`), keyed by remote IP (no auth exists yet).
+  Enforced centrally in `server.ts` on every AI-cost route (analysis, reference extraction, generation, edit,
+  view, video, QC, regenerate) — never inside individual route handlers, matching how CORS is already applied
+  centrally. `RATE_LIMITED` → HTTP 429.
+- **Audit log** (`AuditEvent`/`AuditLogRepository`, `packages/project-core/src/repositories.ts`;
+  `SqliteAuditLogRepository`, `packages/storage-adapters`) — append-only, real rows for the operations that
+  DO have a real server-side route today: `asset.access` (every `GET /assets/:id`), `generation.regenerate`,
+  `asset.delete` (new route, below). Lock enable/disable is explicitly NOT audited — no
+  `PATCH /projects/:id/locks` route exists (locks are still resolved entirely client-side, a pre-existing,
+  already-documented gap this gate didn't introduce or need to close).
+- **CORS allowlist** (`cors.ts`) — the wildcard `Access-Control-Allow-Origin: *` (explicitly flagged in its
+  own comment as a BUILD 18 TODO since it was written) is replaced with `parseAllowedOrigins(ALLOWED_ORIGINS)`
+  reflecting the request's `Origin` back only when it's on the list; every other origin gets no CORS header
+  at all. Defaults to the Vite dev server's own origin so local dev needs zero configuration.
+- **Signed, time-limited asset URLs** (`apps/api/src/signed-asset-url.ts`) — `GET /assets/:id` was a plain,
+  unguarded fetch by (guessable, sequential in the old in-memory store) id; `AssetStore.getSignedUrl()`
+  existed since BUILD 02 but no route ever called it (dead code). `createAssetUrlSigner()` returns `null`
+  when `ASSET_URL_SIGNING_SECRET` isn't configured — every asset URL then stays exactly today's plain
+  behavior (same graceful-degradation pattern as every optional provider key), so zero existing test needed
+  to change. Configured, every URL this API returns (`handleUploadAsset`, every generation/edit/view/
+  regenerate's `outputAssetUrls`, video status polls) is HMAC-signed with an expiry, and `handleGetAsset`
+  verifies it (`INVALID_ASSET_SIGNATURE` → HTTP 403) before ever recording the audit-log access event.
+- **Real deletion** (`handleDeleteAsset`, `DELETE /projects/:id/assets/:assetId`) — `AssetStore.
+  scheduleDeletion()` existed since BUILD 02 but no route ever called it; this makes it real and reachable,
+  audit-logged. The exact *automatic* retention timeframe (delete after N days unused, etc.) stays the
+  documented product/legal decision §13 already names — this only makes on-demand deletion work.
+- **Basic observability** (`packages/shared/src/metrics.ts`, `GET /metrics`) — in-process counters
+  (`http_requests_total{method,status}`) rendered in the standard Prometheus text-exposition format (a real,
+  vendor-agnostic wire format, not a specific vendor's SDK this project has no account for). Latency
+  histograms/tracing/a managed backend stay the explicit §13 vendor decision, not fixed here.
+- **Real local persistence — `node:sqlite` + local disk, replacing every `InMemory*` class**
+  (`packages/storage-adapters`): `SqliteDatabase` (one JSON-blob-per-row table per entity, not a fully
+  normalized per-field schema — a deliberate scope boundary, see the file's own doc comment) backs
+  `SqliteProjectRepository`/`SqliteVersionRepository`/`SqliteAnalysisRepository`/`SqliteReferenceRepository`/
+  `SqliteGenerationRepository`/`SqliteEditRepository`/`SqliteViewRepository`/`SqliteVideoRepository`/
+  `SqliteAuditLogRepository`; `LocalDiskAssetStore` writes real files with a JSON metadata sidecar. Both are
+  real, durable across process restarts — confirmed live (below) — not another in-memory placeholder, and
+  both still sit behind the exact same repository/`AssetStore` interfaces a later managed-Postgres/S3 swap
+  (§13) would need, unchanged for every caller. `app-context.ts`'s `dbPath`/`assetsDir` default to
+  `':memory:'`/a fresh temp directory when unset, so every existing test and ad hoc `createAppContext()` call
+  keeps its exact prior ephemeral-per-context semantics with zero call-site changes; `server.ts`'s real
+  startup path passes real paths from `DATABASE_URL`/`ASSET_STORE_URL`.
+- **Real tooling incompatibility found and worked around, not silently avoided**: this codebase's test runner
+  (Vitest 2.1.9/vite-node) predates `node:sqlite`'s existence and mis-transforms a static `import 'node:sqlite'`
+  into a bare, unresolvable `"sqlite"` specifier (reproduced independently with a minimal test file before
+  concluding it wasn't a code bug). `SqliteDatabase` loads it via `createRequire(import.meta.url)('node:sqlite')`
+  instead — sidesteps vite-node's static import-rewriting entirely, works identically under plain Node, so
+  there's exactly one code path for tests and production, documented in the module's own comment.
+- **Verified live**: built and ran `apps/api` for real with `DATABASE_URL`/`ASSET_STORE_URL`/
+  `ASSET_URL_SIGNING_SECRET`/`ALLOWED_ORIGINS` all set to real values (not test doubles) — created a real
+  project, uploaded a real PNG, confirmed the returned asset URL carries a real signature; confirmed a fetch
+  with the valid signature succeeds (200), with no signature or a tampered one is rejected (403,
+  `INVALID_ASSET_SIGNATURE`); confirmed the real file + metadata sidecar exist on disk; confirmed CORS
+  reflects an allowlisted origin and omits the header entirely for `https://evil.example`; hammered the
+  analysis endpoint past its real 30-request/minute limit and got a real 429; deleted the asset via the new
+  route (204) and confirmed the file is actually gone from disk; read `/metrics` and saw real counts matching
+  every call made. **Then killed and restarted the server** and confirmed the same project and (pre-deletion)
+  asset were still there — real durability across a restart, the actual point of this tier.
+- **447/447 tests pass** (was 426 at the end of BUILD 17); typecheck and lint clean across the whole
+  workspace.
+- **Explicitly out of scope** (documented, not silently skipped): auth (still fully absent — no route reads
+  a session/token anywhere, same as every prior gate's "no auth yet, BUILD 02 deferral"); a managed cloud
+  DB/blob/queue/observability vendor and a real cloud hosting target (§13 — genuinely needs the product
+  owner's account/credentials, not fabricatable); dev-tooling dependency vulnerabilities in the `vite`/
+  `esbuild`/`vitest` chain found during the pre-gate audit (fixing them needs a breaking `vite@8` upgrade,
+  a separate, deliberate decision, not bundled into this gate); rate limiting/audit logging are per-process
+  only (a real multi-instance deployment needs a shared backend behind the same interfaces, same as
+  `JobQueue` already documents for itself).

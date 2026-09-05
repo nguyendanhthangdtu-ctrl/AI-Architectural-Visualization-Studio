@@ -216,3 +216,29 @@ export interface VideoRepository {
   update(video: VideoRecord): Promise<VideoRecord>;
   listByProject(projectId: ProjectId): Promise<VideoRecord[]>;
 }
+
+/**
+ * docs/03 §9 "Audit log (append-only) for: lock enable/disable, destructive/
+ * regenerate actions, deletions, asset access grants" (BUILD 18 hardening —
+ * this requirement existed since §9 was first written but had zero
+ * implementation until now). Lock changes aren't audited yet: locks are
+ * still resolved entirely client-side (no `PATCH /projects/:id/locks` route
+ * exists — a pre-existing, already-documented gap, not introduced here);
+ * this repository covers the operations that DO have a real server-side
+ * route today (asset access, regenerate, asset deletion).
+ */
+export interface AuditEvent {
+  id: string;
+  action: string;
+  /** No auth exists yet (every BUILD gate's "no auth yet, BUILD 02 deferral" caveat) — always 'anonymous' until real auth exists. */
+  actorId: string;
+  projectId: ProjectId | null;
+  targetId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AuditLogRepository {
+  record(event: AuditEvent): Promise<AuditEvent>;
+  listByProject(projectId: ProjectId): Promise<AuditEvent[]>;
+}

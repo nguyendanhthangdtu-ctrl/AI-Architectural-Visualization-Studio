@@ -1,4 +1,4 @@
-import { DomainError } from '@avs/shared';
+import { DomainError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { VideoGenerationAdapter } from './video-adapter.js';
 import type {
   VideoAdapterCapabilities,
@@ -55,7 +55,7 @@ function clampDuration(durationSeconds: number): number {
 
 function classifyVeoError(status: number, message: string): NormalizedAdapterError {
   const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
-  return { code: 'VEO_PROVIDER_ERROR', message: `Veo API error (${status}): ${message}`, retryable };
+  return { code: 'VEO_PROVIDER_ERROR', message: `Veo API error (${status}): ${sanitizeProviderErrorBody(message)}`, retryable };
 }
 
 export function createVeoAdapter(config: VeoAdapterConfig): VideoGenerationAdapter {

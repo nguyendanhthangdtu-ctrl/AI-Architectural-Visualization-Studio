@@ -1,3 +1,5 @@
+import { SECRET_ENV_KEYS } from './env.js';
+
 /**
  * Structured logging boundary — docs/03 §9/§11 ("structured logging must
  * redact known secret field names; adapters never log raw provider payloads
@@ -14,7 +16,22 @@ export interface Logger {
   error(message: string, context?: Record<string, unknown>): void;
 }
 
-const DEFAULT_REDACT_KEYS = ['apiKey', 'api_key', 'secret', 'token', 'password', 'credentials'];
+/**
+ * BUILD 18 fix: includes every `env.ts` `SECRET_ENV_KEYS` name (lowercased)
+ * so a context key like `DATABASE_URL` is redacted for real — a pre-BUILD-18
+ * audit found this list could drift from `SECRET_ENV_KEYS` (e.g.
+ * `database_url` matched none of the generic patterns below), a real gap,
+ * not a hypothetical one.
+ */
+const DEFAULT_REDACT_KEYS = [
+  'apiKey',
+  'api_key',
+  'secret',
+  'token',
+  'password',
+  'credentials',
+  ...SECRET_ENV_KEYS.map((key) => key.toLowerCase()),
+];
 
 function redact(
   context: Record<string, unknown> | undefined,
