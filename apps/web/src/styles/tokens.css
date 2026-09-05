@@ -1,0 +1,55 @@
+:root {
+  /* Surfaces — dark professional tool chrome, distinct from the canvas so the
+     canvas reads as the "photograph", not another panel. */
+  --avs-bg-shell: #0b0d10;
+  --avs-bg-panel: #14171c;
+  --avs-bg-panel-raised: #1b2027;
+  --avs-bg-canvas: #101317;
+  --avs-border: #262c34;
+  --avs-border-strong: #38414d;
+
+  /* Text */
+  --avs-text-primary: #eef1f5;
+  --avs-text-secondary: #9aa4b2;
+  --avs-text-muted: #666f7b;
+
+  /* Accent — warm, restrained; evokes golden-hour architectural photography.
+     Used only for the primary action and active/selected state, never as
+     decoration. */
+  --avs-accent: #d98e3f;
+  --avs-accent-strong: #f0a857;
+  --avs-accent-contrast: #1a1206;
+
+  /* Semantic */
+  --avs-danger: #e5484d;
+  --avs-danger-bg: rgba(229, 72, 77, 0.12);
+  --avs-success: #3fb950;
+  --avs-success-bg: rgba(63, 185, 80, 0.12);
+  --avs-focus-ring: #6fb1ff;
+
+  /* Tier colors for the two Lock families (docs/03 ADR-001) — a visible,
+     non-color-only distinction also carries a text badge, never color alone. */
+  --avs-tier-source-fidelity: #6fb1ff;
+  --avs-tier-output-stability: #b98af0;
+
+  /* Type */
+  --avs-font-sans: ui-sans-serif, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --avs-font-mono: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', Consolas, monospace;
+
+  /* Spacing scale */
+  --avs-space-1: 4px;
+  --avs-space-2: 8px;
+  --avs-space-3: 12px;
+  --avs-space-4: 16px;
+  --avs-space-5: 24px;
+  --avs-space-6: 32px;
+  --avs-space-7: 48px;
+
+  --avs-radius-sm: 4px;
+  --avs-radius-md: 8px;
+  --avs-radius-lg: 12px;
+
+  --avs-header-height: 56px;
+  --avs-control-panel-width: 340px;
+  --avs-inspector-panel-width: 320px;
+}

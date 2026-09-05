@@ -1,0 +1,19 @@
+{
+  "name": "@avs/api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@avs/ai-core": "*",
+    "@avs/model-adapters": "*",
+    "@avs/project-core": "*",
+    "@avs/prompt-engine": "*",
+    "@avs/shared": "*",
+    "@avs/storage-adapters": "*"
+  }
+}

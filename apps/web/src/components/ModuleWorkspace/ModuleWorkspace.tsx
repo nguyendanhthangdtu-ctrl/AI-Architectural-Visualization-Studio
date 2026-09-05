@@ -1,0 +1,90 @@
+import { useState } from 'react';
+import type { ProjectModule } from '@avs/project-core';
+import type { ErrorEnvelope } from '@avs/shared';
+import { Workspace } from '../Workspace/Workspace.js';
+import { PrimaryAction } from '../PrimaryAction/PrimaryAction.js';
+import { EditPanel } from '../EditPanel/EditPanel.js';
+import { MultiViewPanel } from '../MultiViewPanel/MultiViewPanel.js';
+import { VideoPanel } from '../VideoPanel/VideoPanel.js';
+import { ErrorState } from '../ErrorState/ErrorState.js';
+import { useProjectSessionActions, useProjectSessionState } from '../../state/ProjectSessionContext.js';
+import { runGeneration, type RunGenerationParams } from '../../api/client.js';
+import { toErrorEnvelope } from '../../api/errors.js';
+import styles from './ModuleWorkspace.module.css';
+
+export interface ModuleWorkspaceProps {
+  module: ProjectModule;
+}
+
+/**
+ * Shared Architecture/Interior workspace — explicit module boundary ready
+ * for BUILD 04/05 to diverge on, without duplicating the shell. The
+ * Render/Generate PrimaryAction sits last in DOM order, at the bottom of
+ * the main workflow (docs/02 UX rule).
+ *
+ * BUILD 13: Render really calls the Image Generation Pipeline
+ * (`POST /projects/:id/generations`) — enabled once a source image, an
+ * applied scenario (for aspect ratio/resolution/render core), and non-empty
+ * prompt text (from BUILD 11's Compile Prompt, or hand-edited) all exist.
+ * `promptVersion` falls back to `'manual-edit'` when the prompt was never
+ * compiled (CLAUDE.md rule 14 "when available" — a hand-typed prompt has no
+ * real compiler version to report).
+ */
+export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
+  const state = useProjectSessionState();
+  const { setState } = useProjectSessionActions();
+  const [renderStatus, setRenderStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [renderError, setRenderError] = useState<ErrorEnvelope | undefined>(undefined);
+
+  const canRender = Boolean(state.currentProject && state.sourceImage && state.scenario && state.promptDraft.trim());
+
+  const handleRender = async () => {
+    if (!state.currentProject || !state.sourceImage || !state.scenario || !state.promptDraft.trim()) return;
+
+    setRenderStatus('loading');
+    setRenderError(undefined);
+    setState({ status: 'loading', error: null });
+    try {
+      const params: RunGenerationParams = {
+        promptText: state.promptDraft,
+        renderCore: state.scenario.renderCore as RunGenerationParams['renderCore'],
+        aspectRatio: state.scenario.aspectRatio,
+        resolution: state.scenario.generationResolution,
+        sourceAssetId: state.sourceImage.assetId,
+        referenceAssetIds: state.references.map((r) => r.assetId),
+        promptVersion: state.promptOutput?.compiled.compilerVersion ?? 'manual-edit',
+        scenarioVersion: state.scenario.normalizedAt,
+      };
+      const result = await runGeneration(state.currentProject.id, params);
+      setState({
+        currentProject: result.project,
+        latestGenerationOutputUrls: result.outputAssetUrls,
+        latestGenerationId: result.generationId,
+        latestOutputAssetId: result.generation.outputAssets[0] ?? null,
+        status: 'ready',
+      });
+      setRenderStatus('idle');
+    } catch (error) {
+      const envelope = toErrorEnvelope(error, 'Something went wrong generating the image.');
+      setRenderError(envelope);
+      setRenderStatus('error');
+      setState({ status: 'error', error: envelope });
+    }
+  };
+
+  return (
+    <div className={styles.root} data-module={module} aria-label={`${module} workspace`}>
+      <Workspace module={module} />
+      <PrimaryAction
+        label={renderStatus === 'loading' ? 'Rendering…' : 'Render'}
+        disabled={!canRender || renderStatus === 'loading'}
+        {...(canRender && state.scenario ? { hint: `Ready to render with ${state.scenario.renderCore}.` } : {})}
+        onActivate={() => void handleRender()}
+      />
+      {renderStatus === 'error' && renderError ? <ErrorState error={renderError} onRetry={() => void handleRender()} /> : null}
+      <MultiViewPanel />
+      <EditPanel />
+      <VideoPanel />
+    </div>
+  );
+}

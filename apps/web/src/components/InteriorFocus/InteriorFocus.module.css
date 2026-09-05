@@ -1,0 +1,63 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--avs-space-2);
+  padding: var(--avs-space-3);
+  border: 1px solid var(--avs-border);
+  border-radius: var(--avs-radius-md);
+  background: var(--avs-bg-panel);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--avs-space-2);
+}
+
+.title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--avs-text-secondary);
+}
+
+.badge {
+  font-size: 11px;
+  color: var(--avs-text-muted);
+}
+
+.description {
+  margin: 0;
+  color: var(--avs-text-secondary);
+  font-size: 12px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.groupLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--avs-text-secondary);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--avs-space-1);
+}
+
+.chip {
+  padding: 2px var(--avs-space-2);
+  border: 1px solid var(--avs-border-strong);
+  border-radius: 999px;
+  background: var(--avs-bg-panel-raised);
+  color: var(--avs-text-secondary);
+  font-size: 11px;
+}

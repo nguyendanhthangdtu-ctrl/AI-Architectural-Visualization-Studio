@@ -1,0 +1,39 @@
+import { describe, expect, it } from 'vitest';
+import { GoogleFlowAdapter } from './provider-adapters.js';
+import { createNanoBananaAdapter } from './nano-banana-adapter.js';
+import { createChatGPTImageAdapter } from './chatgpt-image-adapter.js';
+import { ImageGenerationService } from './service.js';
+
+const request = {
+  requestId: 'req-1',
+  promptText: 'a modern villa at golden hour',
+  sourceAssets: [{ data: new Uint8Array([1, 2, 3]), contentType: 'image/png' }],
+  referenceAssets: [],
+  aspectRatio: '16:9',
+  resolution: '2K',
+};
+
+describe('Google Flow adapter — no official public API exists (BUILD 12 finding), never faked', () => {
+  it('declares the contract but never simulates a real response', async () => {
+    const adapter = new GoogleFlowAdapter();
+    expect(typeof adapter.id).toBe('string');
+    expect(adapter.capabilities()).toBeDefined();
+    await expect(adapter.generate(request)).rejects.toMatchObject({
+      code: 'NOT_IMPLEMENTED',
+      message: expect.stringContaining('no official public REST API'),
+    });
+  });
+});
+
+describe('all three render-core adapters are resolvable through ImageGenerationService', () => {
+  it('resolves each by id, alongside the FutureAdapter test double pattern', () => {
+    const service = new ImageGenerationService({
+      'nano-banana': createNanoBananaAdapter({ apiKey: undefined }),
+      'google-flow': new GoogleFlowAdapter(),
+      'chatgpt-image': createChatGPTImageAdapter({ apiKey: undefined }),
+    });
+    expect(service.resolve('nano-banana').id).toBe('nano-banana');
+    expect(service.resolve('google-flow').id).toBe('google-flow');
+    expect(service.resolve('chatgpt-image').id).toBe('chatgpt-image');
+  });
+});

@@ -1,0 +1,41 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--avs-space-2);
+}
+
+.frame {
+  border: 1px solid var(--avs-border);
+  border-radius: var(--avs-radius-md);
+  overflow: hidden;
+  background: var(--avs-bg-canvas);
+}
+
+.image {
+  width: 100%;
+  display: block;
+}
+
+.actions {
+  display: flex;
+  gap: var(--avs-space-2);
+}
+
+.action {
+  flex: 1;
+  padding: var(--avs-space-2) var(--avs-space-3);
+  border: 1px solid var(--avs-border-strong);
+  border-radius: var(--avs-radius-sm);
+  background: transparent;
+  color: var(--avs-text-primary);
+  font-size: 12px;
+}
+
+.action:hover {
+  background: var(--avs-bg-panel-raised);
+}
+
+.remove {
+  color: var(--avs-danger);
+  border-color: var(--avs-danger);
+}

@@ -1,0 +1,51 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--avs-bg-shell);
+  color: var(--avs-text-primary);
+  font-family: var(--avs-font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Visible focus for every interactive element — never rely on color alone. */
+:focus-visible {
+  outline: 2px solid var(--avs-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--avs-radius-sm);
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}

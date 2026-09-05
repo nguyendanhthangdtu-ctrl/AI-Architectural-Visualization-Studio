@@ -1,0 +1,66 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--avs-space-2);
+  padding: var(--avs-space-3);
+  border: 1px solid var(--avs-border);
+  border-radius: var(--avs-radius-md);
+  background: var(--avs-bg-panel);
+}
+
+.title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--avs-text-secondary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.field label {
+  font-size: 11px;
+  color: var(--avs-text-secondary);
+}
+
+.field select,
+.field input,
+.textarea {
+  padding: var(--avs-space-1) var(--avs-space-2);
+  border: 1px solid var(--avs-border-strong);
+  border-radius: var(--avs-radius-sm);
+  background: var(--avs-bg-canvas);
+  color: var(--avs-text-primary);
+  font-size: 12px;
+}
+
+.textarea {
+  min-height: 60px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.applyButton {
+  padding: var(--avs-space-2) var(--avs-space-3);
+  border: 1px solid var(--avs-accent);
+  border-radius: var(--avs-radius-sm);
+  background: transparent;
+  color: var(--avs-accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.applyButton:hover:not(:disabled) {
+  background: var(--avs-bg-panel-raised);
+}
+
+.applyButton:disabled {
+  color: var(--avs-text-muted);
+  border-color: var(--avs-border-strong);
+  cursor: not-allowed;
+}

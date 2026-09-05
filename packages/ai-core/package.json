@@ -1,0 +1,16 @@
+{
+  "name": "@avs/ai-core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "@avs/project-core": "*",
+    "@avs/shared": "*"
+  }
+}

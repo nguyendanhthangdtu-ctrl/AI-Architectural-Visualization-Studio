@@ -1,0 +1,28 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--avs-space-2);
+  padding: var(--avs-space-6) var(--avs-space-4);
+  color: var(--avs-text-secondary);
+  text-align: center;
+}
+
+.icon {
+  color: var(--avs-text-muted);
+}
+
+.title {
+  margin: 0;
+  color: var(--avs-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.description {
+  margin: 0;
+  max-width: 32ch;
+  color: var(--avs-text-secondary);
+  font-size: 13px;
+}

@@ -21,7 +21,7 @@
 - Multi-view
 - Sync View
 - Creative View
-- Project DNA/version tree
+- Project DNA/version tree (multi-version history/branching UI; baseline DNA persistence required for MVP locks, per Product Constitution, is not deferred)
 - Image-to-video
 - Batch generation
 - Provider routing/cost optimization

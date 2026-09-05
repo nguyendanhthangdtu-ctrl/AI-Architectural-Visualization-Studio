@@ -1,0 +1,17 @@
+{
+  "name": "@avs/prompt-engine",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "@avs/ai-core": "*",
+    "@avs/project-core": "*",
+    "@avs/shared": "*"
+  }
+}

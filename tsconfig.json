@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/ui" },
+    { "path": "packages/project-core" },
+    { "path": "packages/ai-core" },
+    { "path": "packages/prompt-engine" },
+    { "path": "packages/model-adapters" },
+    { "path": "packages/storage-adapters" },
+    { "path": "apps/api" }
+  ]
+}

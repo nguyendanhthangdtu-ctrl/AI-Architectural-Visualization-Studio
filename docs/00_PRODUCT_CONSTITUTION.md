@@ -22,3 +22,4 @@ Real-life photography / professional architectural photography.
 - Creativity is constrained by permissions.
 - Project DNA persists across views and generations.
 - Every generated result has provenance.
+- Bilingual by design (Vietnamese + English), business/domain data stays language-neutral (see docs/03 §22).

@@ -1,0 +1,42 @@
+.root {
+  width: var(--avs-control-panel-width);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--avs-space-3);
+  padding: var(--avs-space-3);
+  border-right: 1px solid var(--avs-border);
+  background: var(--avs-bg-panel);
+  overflow-y: auto;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--avs-text-secondary);
+}
+
+.analyzeButton {
+  margin-top: var(--avs-space-2);
+  width: 100%;
+  padding: var(--avs-space-2) var(--avs-space-3);
+  border: 1px solid var(--avs-accent);
+  border-radius: var(--avs-radius-sm);
+  background: transparent;
+  color: var(--avs-accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.analyzeButton:hover:not(:disabled) {
+  background: var(--avs-bg-panel-raised);
+}
+
+.analyzeButton:disabled {
+  color: var(--avs-text-muted);
+  border-color: var(--avs-border-strong);
+  cursor: not-allowed;
+}

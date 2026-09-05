@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/project-core" },
+    { "path": "../../packages/ai-core" },
+    { "path": "../../packages/prompt-engine" },
+    { "path": "../../packages/model-adapters" },
+    { "path": "../../packages/storage-adapters" }
+  ]
+}

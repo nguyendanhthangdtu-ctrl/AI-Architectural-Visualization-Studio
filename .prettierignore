@@ -1,0 +1,9 @@
+dist/
+node_modules/
+*.tsbuildinfo
+
+# Documentation is hand-maintained per CLAUDE.md rule 8 / BUILD 02 instruction 5 —
+# formatting is scoped to source/config, never to existing docs.
+*.md
+docs/
+templates/
