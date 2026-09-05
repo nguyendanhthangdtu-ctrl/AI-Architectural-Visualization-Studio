@@ -51,8 +51,17 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelDefinition[] = [
     displayName: 'Nano Banana 2',
     type: 'image-generation',
     capabilities: {
-      defaultResolution: '1K',
-      supportedResolutions: ['0.5K', '1K', '2K', '4K'],
+      // BUILD 26 fix — expressed in the app's own SCENARIO_RESOLUTIONS
+      // vocabulary, like every other entry here (this was previously listed
+      // in Nano Banana 2's own provider-side image_size values —
+      // '0.5K'/'1K'/'2K'/'4K' — a real, inconsistent unit mismatch against
+      // every other entry, which meant a UI reading this field would have
+      // wrongly disabled 'Preview'/'6K'/'8K/Ultra' as "unsupported" even
+      // though `mapResolutionToImageSize()` (nano-banana-adapter.ts)
+      // already accepts and correctly translates any of them — capped at
+      // Nano Banana 2's real 4K ceiling, never rejected.
+      defaultResolution: 'Preview', // maps to Nano Banana 2's real '1K' baseline via mapResolutionToImageSize()
+      supportedResolutions: [...SCENARIO_RESOLUTIONS],
       supportedAspectRatios: ['1:1', '16:9', '9:16'],
       supportsReferenceImages: true,
       supportsImageEditing: true,

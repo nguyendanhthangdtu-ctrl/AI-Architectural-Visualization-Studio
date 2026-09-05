@@ -49,7 +49,7 @@ const SCENARIO = {
 describe('ModuleWorkspace — BUILD 13 real Render action', () => {
   it('stays disabled until source image, scenario, and prompt text all exist', () => {
     renderWithState({});
-    expect(screen.getByRole('button', { name: 'Render' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' })).toBeDisabled();
   });
 
   it('enables Render once everything required exists', () => {
@@ -59,7 +59,7 @@ describe('ModuleWorkspace — BUILD 13 real Render action', () => {
       scenario: SCENARIO,
       promptDraft: 'a modern villa at golden hour',
     });
-    expect(screen.getByRole('button', { name: 'Render' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' })).toBeEnabled();
     expect(screen.getByText(/Ready to render with Nano Banana/)).toBeInTheDocument();
   });
 
@@ -96,7 +96,7 @@ describe('ModuleWorkspace — BUILD 13 real Render action', () => {
         promptDraft: 'a modern villa at golden hour',
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Render' }));
+      fireEvent.click(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' }));
 
       await waitFor(() => expect(screen.getByRole('img', { name: 'Generated photograph' })).toBeInTheDocument());
 
@@ -113,6 +113,10 @@ describe('ModuleWorkspace — BUILD 13 real Render action', () => {
         promptVersion: 'manual-edit', // no promptOutput was compiled — honest fallback (CLAUDE.md rule 14 "when available")
         scenarioVersion: '2026-09-04T00:00:00.000Z',
       });
+
+      // BUILD 26 Result View — real Download/Copy actions appear for the real output, pointing at the real asset URL.
+      expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/assets/out-1');
+      expect(screen.getByRole('button', { name: 'Copy Image URL' })).toBeInTheDocument();
     });
 
     it('shows the real error envelope, not a fake image, when generation fails', async () => {
@@ -128,9 +132,33 @@ describe('ModuleWorkspace — BUILD 13 real Render action', () => {
         promptDraft: 'a modern villa at golden hour',
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Render' }));
+      fireEvent.click(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' }));
 
       await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('NANO_BANANA_API_KEY is not configured.'));
+      expect(screen.queryByRole('img', { name: 'Generated photograph' })).not.toBeInTheDocument();
+    });
+
+    it('BUILD 26: shows the real, required friendly message for a quota/billing failure, not the raw server text', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          { code: 'NANO_BANANA_PROVIDER_ERROR', providerCode: 'PROVIDER_QUOTA_EXCEEDED', message: 'Gemini API error (429): quota exceeded', retryable: false },
+          { status: 502 },
+        ),
+      );
+
+      renderWithState({
+        currentProject: PROJECT,
+        sourceImage: { assetId: 'a1', url: '/assets/a1' },
+        scenario: SCENARIO,
+        promptDraft: 'a modern villa at golden hour',
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' }));
+
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent('Gemini quota/billing is unavailable. Please try later or use Mock Mode.'),
+      );
       expect(screen.queryByRole('img', { name: 'Generated photograph' })).not.toBeInTheDocument();
     });
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCENARIO_RENDER_CORES } from './scenario-vocabulary.js';
+import { SCENARIO_RENDER_CORES, SCENARIO_RESOLUTIONS } from './scenario-vocabulary.js';
 import {
   DEFAULT_IMAGE_MODEL_RENDER_CORE,
   findImageModelByRenderCore,
@@ -36,8 +36,11 @@ describe('IMAGE_MODEL_REGISTRY (BUILD 25 Multi-Model Image Engine)', () => {
       type: 'image-generation',
       enabled: true,
     });
-    expect(nanoBanana2?.capabilities.supportedResolutions).toEqual(['0.5K', '1K', '2K', '4K']);
-    expect(nanoBanana2?.capabilities.defaultResolution).toBe('1K');
+    // BUILD 26 — expressed in the app's own SCENARIO_RESOLUTIONS vocabulary,
+    // like every other registry entry (see image-model-registry.ts's own
+    // doc comment for why this was a real unit-mismatch bug, now fixed).
+    expect(nanoBanana2?.capabilities.supportedResolutions).toEqual([...SCENARIO_RESOLUTIONS]);
+    expect(nanoBanana2?.capabilities.defaultResolution).toBe('Preview');
   });
 
   it('sets Nano Banana 2 as the default image model render core', () => {

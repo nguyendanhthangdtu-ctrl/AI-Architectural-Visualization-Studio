@@ -1829,3 +1829,46 @@ resolution mapping, Mock Provider, and error-taxonomy refinements around it; it 
 - **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED.** No live Gemini call was made in this gate
   (per its own instruction not to spend real quota unless explicitly required); the Mock E2E proves the full
   pipeline is wired correctly, which is not the same as a verified live generation.
+
+## 40. BUILD 26 Production UX & Render Workflow Hardening Record
+
+Full writeup: `docs/BUILD_26_PRODUCTION_UX_RENDER_WORKFLOW.md`. An audit-and-harden gate over the existing
+render workflow (Upload → Analysis → Detect Prompt → Prompt Editor → Visual Controls → Model → Render →
+Result → QC → Asset Store → Signed URL → Download), not a rebuild — most of the requested workflow already
+existed and worked (BUILD 06-25); this gate found and fixed real gaps.
+
+- **Real registry bug fixed** (`image-model-registry.ts`) — Nano Banana 2's `supportedResolutions` was
+  expressed in provider wire units (`0.5K/1K/2K/4K`) while every other entry used the app's own
+  `SCENARIO_RESOLUTIONS` vocabulary — a real unit mismatch from BUILD 25. Fixed to app-level units,
+  consistent with every other entry; `mapResolutionToImageSize()` already handled the real translation
+  regardless.
+- **Real capability-enforcement gap fixed** (`ScenarioSlots.tsx`) — nothing previously stopped a user from
+  selecting an aspect ratio/resolution the currently-selected model's own real `capabilities()` doesn't
+  support (e.g. `4:3` with Nano Banana 2, which only supports `1:1`/`16:9`/`9:16`) — the request would have
+  reached the real provider unvalidated. Now: unsupported `<option>`s are disabled using each adapter's own
+  already-accurate capability data (never a second invented list), and "Apply Scenario" is blocked with a
+  real, visible message naming the exact incompatible field/value if a model switch leaves an incompatible
+  selection in place.
+- **Render button label** → exact required `'RENDER — PHOTOREALISTIC ARCHITECTURE'` (`ModuleWorkspace.tsx`).
+- **Real friendly error messages** (`friendlyRenderErrorMessage()`, new, `apps/web/src/api/errors.ts`) — maps
+  the real `providerCode` taxonomy (BUILD 21/25, unchanged) to this build's exact required sentences for
+  quota/billing, invalid credentials, and unavailable-model failures; every other envelope keeps its real
+  message unchanged. The technical category still renders alongside it, never hidden.
+- **Result View gained real Download + Copy Image URL actions** (new `ResultActions` component) — neither
+  existed before this build (verified by search). Real `<a download>` (no guessed extension), real Clipboard
+  API with a real failure state.
+- **Deliberately not built** (documented, not silently skipped): a fabricated multi-phase render state
+  machine the real synchronous backend can't actually report; a "Mock Mode" UI badge for a provider that is
+  never wired into real production traffic; a replacement of the shared `SCENARIO_RESOLUTIONS`/
+  `SCENARIO_ASPECT_RATIOS` vocabularies (also used by video generation, out of this gate's scope) — the real
+  underlying need (never sending an unsupported combination to a real provider) is fully met by the
+  capability-aware disabling above instead. QC remains a separate, explicit, user-triggered step (BUILD 17),
+  not an automatic gate — changing that would be a real architecture change with no discovered defect
+  requiring it.
+- **604/604 tests pass, 3 correctly skipped** (was 592/3 at the end of BUILD 25 — +12 new tests); typecheck,
+  lint, and production build all clean; built `apps/web` bundle re-grepped for every provider key/header name
+  — zero matches. A full live interactive browser session was not performed this gate (disclosed explicitly,
+  not claimed) — verification relied on the real-DOM-assertion component test suite instead.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, unchanged from BUILD 24/25 — no live AI
+  provider credential exists in this environment; nothing in this UX-focused gate changes that external
+  dependency.

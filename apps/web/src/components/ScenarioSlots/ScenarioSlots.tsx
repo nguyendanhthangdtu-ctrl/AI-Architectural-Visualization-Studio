@@ -40,15 +40,50 @@ function renderCoreOptionLabel(renderCore: string): string {
   return model ? `${model.displayName} — ${model.provider === 'google-gemini' ? 'Google Gemini' : model.provider} (${model.id})` : renderCore;
 }
 
+/**
+ * BUILD 26 — "Nếu model không hỗ trợ: disable option và validate. Không gửi
+ * request sai." Reads the CURRENTLY selected AI Image Model's own real
+ * `capabilities()` (already accurate per-adapter since BUILD 12, joined via
+ * the registry) — never a second, invented capability list. `renderCore ===
+ * 'Auto'` or an unrecognized value never disables anything here: the server
+ * resolves 'Auto' to whichever adapter is actually registered, which this
+ * client-side check has no way to predict.
+ */
+function isOptionUnsupportedByCurrentModel(
+  value: string,
+  renderCore: string,
+  capabilityKey: 'supportedResolutions' | 'supportedAspectRatios',
+): boolean {
+  const model = findImageModelByRenderCore(renderCore);
+  if (!model) return false;
+  return !model.capabilities[capabilityKey].includes(value);
+}
+
 /** docs/07_SCENARIO_BUILDER_SPEC.md enumerations — the single source of truth is packages/ai-core's scenario-vocabulary.ts. */
-const SELECT_FIELDS: { key: SelectFieldKey; label: string; options: readonly string[]; getOptionLabel?: (value: string) => string }[] = [
+const SELECT_FIELDS: {
+  key: SelectFieldKey;
+  label: string;
+  options: readonly string[];
+  getOptionLabel?: (value: string) => string;
+  isOptionDisabled?: (value: string, draft: ScenarioInput) => boolean;
+}[] = [
   { key: 'context', label: 'Context', options: SCENARIO_CONTEXTS },
   { key: 'lighting', label: 'Lighting', options: SCENARIO_LIGHTING_OPTIONS },
   { key: 'sunDirection', label: 'Sun Direction', options: SCENARIO_SUN_DIRECTIONS },
   { key: 'environment', label: 'Environment', options: SCENARIO_ENVIRONMENTS },
   { key: 'cameraMode', label: 'Camera', options: SCENARIO_CAMERA_MODES },
-  { key: 'aspectRatio', label: 'Aspect Ratio', options: SCENARIO_ASPECT_RATIOS },
-  { key: 'generationResolution', label: 'Generation Resolution', options: SCENARIO_RESOLUTIONS },
+  {
+    key: 'aspectRatio',
+    label: 'Aspect Ratio',
+    options: SCENARIO_ASPECT_RATIOS,
+    isOptionDisabled: (value, draft) => isOptionUnsupportedByCurrentModel(value, draft.renderCore, 'supportedAspectRatios'),
+  },
+  {
+    key: 'generationResolution',
+    label: 'Generation Resolution',
+    options: SCENARIO_RESOLUTIONS,
+    isOptionDisabled: (value, draft) => isOptionUnsupportedByCurrentModel(value, draft.renderCore, 'supportedResolutions'),
+  },
   { key: 'upscaleResolution', label: 'Upscale Resolution', options: SCENARIO_RESOLUTIONS },
   { key: 'renderCore', label: 'AI Image Model', options: AI_IMAGE_MODEL_OPTIONS, getOptionLabel: renderCoreOptionLabel },
 ];
@@ -83,7 +118,15 @@ export function ScenarioSlots() {
   const [applyStatus, setApplyStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [applyError, setApplyError] = useState<ErrorEnvelope | undefined>(undefined);
 
-  const canApply = SELECT_FIELDS.every((field) => draft[field.key].trim() !== '');
+  const allFieldsFilled = SELECT_FIELDS.every((field) => draft[field.key].trim() !== '');
+  // BUILD 26 — never let "Apply Scenario" succeed with a combination the
+  // currently selected model can't actually render (e.g. switching model
+  // after already picking an aspect ratio/resolution only the previous model
+  // supported) — this is the client-side half of "không gửi request sai";
+  // the server's own adapter validate()/capabilities() remain the real,
+  // final authority regardless.
+  const incompatibleField = SELECT_FIELDS.find((field) => draft[field.key].trim() !== '' && field.isOptionDisabled?.(draft[field.key], draft));
+  const canApply = allFieldsFilled && !incompatibleField;
 
   const toggleArtificialLighting = (option: string) => {
     setDraft((prev) => ({
@@ -127,7 +170,7 @@ export function ScenarioSlots() {
             >
               <option value="">—</option>
               {field.options.map((option) => (
-                <option key={option} value={option}>
+                <option key={option} value={option} disabled={field.isOptionDisabled?.(option, draft) ?? false}>
                   {field.getOptionLabel ? field.getOptionLabel(option) : option}
                 </option>
               ))}
@@ -150,6 +193,12 @@ export function ScenarioSlots() {
           ))}
         </div>
       </fieldset>
+      {incompatibleField ? (
+        <p role="alert" className={styles.incompatibleWarning}>
+          {incompatibleField.label} "{draft[incompatibleField.key]}" is not supported by the selected AI Image
+          Model. Choose a different value or a different model.
+        </p>
+      ) : null}
       <button
         type="button"
         className={styles.applyButton}

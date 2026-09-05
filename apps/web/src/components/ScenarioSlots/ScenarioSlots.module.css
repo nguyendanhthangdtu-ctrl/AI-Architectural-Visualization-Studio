@@ -82,6 +82,16 @@
   color: var(--avs-text-primary);
 }
 
+.incompatibleWarning {
+  margin: 0;
+  padding: var(--avs-space-2) var(--avs-space-3);
+  border: 1px solid var(--avs-danger);
+  background: var(--avs-danger-bg);
+  border-radius: var(--avs-radius-sm);
+  color: var(--avs-text-primary);
+  font-size: 12px;
+}
+
 .applyButton {
   margin-top: var(--avs-space-1);
   width: 100%;

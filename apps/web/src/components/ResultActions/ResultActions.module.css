@@ -1,0 +1,21 @@
+.root {
+  display: flex;
+  gap: var(--avs-space-2);
+}
+
+.action {
+  flex: 1;
+  padding: var(--avs-space-2) var(--avs-space-3);
+  border: 1px solid var(--avs-border-strong);
+  border-radius: var(--avs-radius-sm);
+  background: transparent;
+  color: var(--avs-text-primary);
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--avs-bg-panel-raised);
+}

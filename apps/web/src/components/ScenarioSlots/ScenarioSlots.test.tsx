@@ -50,6 +50,25 @@ describe('ScenarioSlots', () => {
     expect(screen.getByRole('option', { name: 'Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)' })).toBeInTheDocument();
   });
 
+  it('BUILD 26: disables an Aspect Ratio option the currently selected model does not support', () => {
+    renderScenarioSlots();
+    // Default model is Nano Banana 2, whose real capabilities().supportedAspectRatios is ['1:1','16:9','9:16'] — '4:3' is not in it.
+    const disabledOption = screen.getByRole('option', { name: '4:3' }) as HTMLOptionElement;
+    expect(disabledOption.disabled).toBe(true);
+    const enabledOption = screen.getByRole('option', { name: '16:9' }) as HTMLOptionElement;
+    expect(enabledOption.disabled).toBe(false);
+  });
+
+  it('BUILD 26: warns and keeps Apply Scenario disabled when the selected Aspect Ratio is incompatible with the selected model', () => {
+    renderScenarioSlots();
+    fillValidScenario(); // ends with renderCore: 'Auto', aspectRatio: '2:3' — both currently valid together
+    // Switch back to Nano Banana 2, which does NOT support '2:3'.
+    fireEvent.change(screen.getByLabelText('AI Image Model'), { target: { value: 'Nano Banana' } });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Aspect Ratio "2:3" is not supported by the selected AI Image Model/);
+    expect(screen.getByRole('button', { name: /apply scenario/i })).toBeDisabled();
+  });
+
   it('BUILD 25: never offers Google Flow as a visible AI Image Model choice — its adapter is NOT_IMPLEMENTED', () => {
     renderScenarioSlots();
     expect(screen.queryByRole('option', { name: /Google Flow/i })).not.toBeInTheDocument();

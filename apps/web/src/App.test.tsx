@@ -90,7 +90,7 @@ describe('App (BUILD 03 UI/UX Foundation)', () => {
     const moduleWorkspace = screen.getByLabelText('architecture workspace');
     const renderBar = screen.getByTestId('primary-action-bar');
     expect(moduleWorkspace.contains(renderBar)).toBe(true);
-    expect(within(renderBar).getByRole('button', { name: 'Render' })).toBeInTheDocument();
+    expect(within(renderBar).getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' })).toBeInTheDocument();
     // BUILD 14: the Advanced Editor extends the flow after Render (it only ever
     // has something to edit once a generation exists) — Render still comes
     // before it in document order, but is no longer the literal last child.
@@ -122,7 +122,7 @@ describe('App (BUILD 03 UI/UX Foundation)', () => {
     await renderApp();
     expect(screen.getByRole('link', { name: 'Architecture' })).toBeVisible();
     expect(screen.getByRole('button', { name: /drop a viewport image/i })).toHaveAttribute('tabIndex', '0');
-    expect(screen.getByRole('button', { name: 'Render' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' })).toBeInTheDocument();
   });
 
   it('renders the Project/Workspace placeholder route without fabricating project data', async () => {
