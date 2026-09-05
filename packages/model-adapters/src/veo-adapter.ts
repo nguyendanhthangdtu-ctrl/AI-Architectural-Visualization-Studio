@@ -1,4 +1,4 @@
-import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
+import { classifyProviderHttpStatus, DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 
 /** Video downloads are real files, not a small JSON response — a longer timeout than the default 60s avoids classifying a merely-slow-but-healthy download as a hang. */
 const VIDEO_DOWNLOAD_TIMEOUT_MS = 180_000;
@@ -57,8 +57,13 @@ function clampDuration(durationSeconds: number): number {
 }
 
 function classifyVeoError(status: number, message: string): NormalizedAdapterError {
-  const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
-  return { code: 'VEO_PROVIDER_ERROR', message: `Veo API error (${status}): ${sanitizeProviderErrorBody(message)}`, retryable };
+  const { category, retryable } = classifyProviderHttpStatus(status);
+  return {
+    code: 'VEO_PROVIDER_ERROR',
+    message: `Veo API error (${status}): ${sanitizeProviderErrorBody(message)}`,
+    retryable,
+    providerCode: category,
+  };
 }
 
 export function createVeoAdapter(config: VeoAdapterConfig): VideoGenerationAdapter {

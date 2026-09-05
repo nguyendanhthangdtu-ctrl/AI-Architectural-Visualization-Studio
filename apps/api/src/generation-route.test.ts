@@ -20,6 +20,21 @@ const VALID_BODY = {
   scenarioVersion: '2026-09-04T00:00:00.000Z',
 };
 
+function fakeAdapterReturning(id: string, outputAssetUrls: string[]): ImageGenerationAdapter {
+  return {
+    id,
+    capabilities: () => ({ maxResolution: '2K', supportedAspectRatios: ['2:3'], supportsEdit: false, supportsUpscale: false }),
+    validate: (request) => ({ valid: request.sourceAssets.length > 0 && Boolean(request.promptText.trim()), errors: [] }),
+    generate: async (request) => ({
+      status: 'succeeded',
+      outputAssetUrls,
+      usageMetadata: { adapter: id, model: 'fake-model', requestId: request.requestId },
+      providerJobId: 'fake-job-1',
+    }),
+    normalizeError: (e) => ({ code: 'FAKE_ERROR', message: String(e), retryable: false }),
+  };
+}
+
 function fakeSucceedingAdapter(id: string): ImageGenerationAdapter {
   return {
     id,
@@ -27,7 +42,10 @@ function fakeSucceedingAdapter(id: string): ImageGenerationAdapter {
     validate: (request) => ({ valid: request.sourceAssets.length > 0 && Boolean(request.promptText.trim()), errors: [] }),
     generate: async (request) => ({
       status: 'succeeded',
-      outputAssetUrls: ['data:image/png;base64,ZmFrZS1nZW5lcmF0ZWQtaW1hZ2U='],
+      // BUILD 21: a real, valid 1x1 PNG — output validation (routes.ts's
+      // decodeDataUri) now requires a genuinely decodable image, not an
+      // arbitrary placeholder string, so the fixture must be real too.
+      outputAssetUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
       usageMetadata: { adapter: id, model: 'fake-model', requestId: request.requestId },
       providerJobId: 'fake-job-1',
     }),
@@ -99,7 +117,7 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
     const outputRes = await fetch(`${baseUrl}${body.outputAssetUrls[0]}`, withCookie({}, session.cookie));
     expect(outputRes.status).toBe(200);
     const outputBytes = Buffer.from(await outputRes.arrayBuffer());
-    expect(outputBytes.toString('base64')).toBe('ZmFrZS1nZW5lcmF0ZWQtaW1hZ2U=');
+    expect(outputBytes.toString('base64')).toBe('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=');
 
     const stored = await context.generationRepository.getById(body.generationId);
     expect(stored).toMatchObject({ projectId: project.id, sourceAssets: [asset.id], status: 'succeeded' });
@@ -109,6 +127,114 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
 
     const job = await context.jobQueue.getStatus(body.jobId);
     expect(job?.status).toBe('succeeded');
+  });
+
+  it('BUILD 21: an Idempotency-Key header prevents a client retry from calling the provider twice', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    const realAdapter = fakeSucceedingAdapter('nano-banana');
+    const generateSpy = vi.fn(realAdapter.generate);
+    context.imageGenerationService = new ImageGenerationService({ 'nano-banana': { ...realAdapter, generate: generateSpy } });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+
+    const requestInit = withCookie(
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'retry-test-key-1' },
+        body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id, referenceAssetIds: [] }),
+      },
+      session.cookie,
+    );
+
+    const first = await fetch(`${baseUrl}/projects/${project.id}/generations`, requestInit);
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { outputAssetUrls: string[]; generationId: string };
+
+    // Simulates the client never seeing the first response (e.g. a dropped
+    // connection) and retrying with the exact same key.
+    const second = await fetch(`${baseUrl}/projects/${project.id}/generations`, requestInit);
+    expect(second.status).toBe(201);
+    const secondBody = (await second.json()) as { outputAssetUrls: string[]; generationId: string };
+
+    expect(generateSpy).toHaveBeenCalledTimes(1); // the real, cost-bearing call happened exactly once
+    expect(secondBody.outputAssetUrls).toEqual(firstBody.outputAssetUrls); // same already-persisted output asset reused
+    expect(secondBody.generationId).not.toBe(firstBody.generationId); // still a distinct, real GenerationRecord per HTTP call
+  });
+
+  it('BUILD 21: two concurrent requests with the same Idempotency-Key never both call the provider', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    let releaseGenerate: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseGenerate = resolve;
+    });
+    const realAdapter = fakeSucceedingAdapter('nano-banana');
+    const generateSpy = vi.fn(async (request: Parameters<typeof realAdapter.generate>[0]) => {
+      await gate;
+      return realAdapter.generate(request);
+    });
+    context.imageGenerationService = new ImageGenerationService({ 'nano-banana': { ...realAdapter, generate: generateSpy } });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+
+    const requestInit = withCookie(
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'concurrent-test-key-1' },
+        body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id, referenceAssetIds: [] }),
+      },
+      session.cookie,
+    );
+
+    const firstPromise = fetch(`${baseUrl}/projects/${project.id}/generations`, requestInit);
+    await new Promise((resolve) => setTimeout(resolve, 20)); // let the first request actually enqueue+start running
+    const second = await fetch(`${baseUrl}/projects/${project.id}/generations`, requestInit);
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toMatchObject({ code: 'GENERATION_IN_PROGRESS' });
+
+    releaseGenerate?.();
+    const first = await firstPromise;
+    expect(first.status).toBe(201);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('BUILD 21 Phase 4: rejects a provider response that is not real, decodable image data — never persists it as a bogus asset', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    context.imageGenerationService = new ImageGenerationService({
+      'nano-banana': fakeAdapterReturning('nano-banana', ['data:image/png;base64,dGhpcyBpcyBub3QgYSByZWFsIHBuZw==']), // "this is not a real png"
+    });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+
+    const res = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id, referenceAssetIds: [] }),
+    }, session.cookie));
+
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toMatchObject({ code: 'GENERATION_OUTPUT_INVALID' });
+  });
+
+  it('BUILD 21 Phase 4: rejects an empty provider output payload', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    context.imageGenerationService = new ImageGenerationService({
+      'nano-banana': fakeAdapterReturning('nano-banana', ['data:image/png;base64,']),
+    });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+
+    const res = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id, referenceAssetIds: [] }),
+    }, session.cookie));
+
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toMatchObject({ code: 'GENERATION_OUTPUT_INVALID' });
   });
 
   it('returns 404 for an unknown project', async () => {

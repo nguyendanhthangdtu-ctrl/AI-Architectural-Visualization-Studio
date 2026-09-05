@@ -145,6 +145,20 @@ describe('createGeminiVisionAnalysisEngine', () => {
     });
   });
 
+  it('BUILD 21: tags the standardized providerCode category alongside the existing VISION_PROVIDER_ERROR code', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      text: async () => 'quota exceeded',
+    });
+    const engine = createGeminiVisionAnalysisEngine({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch });
+    await expect(engine.analyze(sourceAsset, 'architecture')).rejects.toMatchObject({
+      code: 'VISION_PROVIDER_ERROR',
+      providerCode: 'PROVIDER_RATE_LIMITED',
+    });
+  });
+
   it('rejects when the model returns output_text that is not valid JSON', async () => {
     const fetchFn = vi
       .fn()

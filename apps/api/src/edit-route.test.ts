@@ -27,14 +27,16 @@ function editCapableAdapter(id: string, captured?: { lastPromptText?: string }):
     validate: () => ({ valid: true, errors: [] }),
     generate: async () => ({
       status: 'succeeded',
-      outputAssetUrls: ['data:image/png;base64,ZmFrZS1nZW5lcmF0ZWQ='],
+      // BUILD 21: a real, valid 1x1 PNG — output validation now requires a genuinely decodable image.
+      outputAssetUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
       usageMetadata: { adapter: id, model: 'fake-model' },
     }),
     edit: async (request) => {
       if (captured) captured.lastPromptText = request.promptText;
       return {
         status: 'succeeded',
-        outputAssetUrls: ['data:image/png;base64,ZWRpdGVkLW91dHB1dA=='],
+        // BUILD 21: a real, valid 2x1 PNG, deliberately distinct from the generate-step fixture above, so the assertion below proves this is really the edited output.
+        outputAssetUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGP4z8DA8J8BAAf/Af8Bf4mnAAAAAElFTkSuQmCC'],
         usageMetadata: { adapter: id, model: 'fake-edit-model' },
       };
     },
@@ -49,7 +51,8 @@ function noEditAdapter(id: string): ImageGenerationAdapter {
     validate: () => ({ valid: true, errors: [] }),
     generate: async () => ({
       status: 'succeeded',
-      outputAssetUrls: ['data:image/png;base64,ZmFrZS1nZW5lcmF0ZWQ='],
+      // BUILD 21: a real, valid 1x1 PNG — output validation now requires a genuinely decodable image.
+      outputAssetUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
       usageMetadata: { adapter: id, model: 'fake-model' },
     }),
     normalizeError: (e) => ({ code: 'FAKE_ERROR', message: String(e), retryable: false }),
@@ -144,7 +147,9 @@ describe('apps/api edit route (BUILD 14 Advanced Image Editor)', () => {
 
     // Real output asset — fetchable, decoded from the adapter's data: URI, not echoed back verbatim.
     const outputRes = await fetch(`${baseUrl}${body.outputAssetUrls[0]}`, withCookie({}, session.cookie));
-    expect(Buffer.from(await outputRes.arrayBuffer()).toString('base64')).toBe('ZWRpdGVkLW91dHB1dA==');
+    expect(Buffer.from(await outputRes.arrayBuffer()).toString('base64')).toBe(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGP4z8DA8J8BAAf/Af8Bf4mnAAAAAElFTkSuQmCC',
+    );
 
     // The composed instruction real carries the declared region/change/protected-locks (docs/12).
     expect(captured.lastPromptText).toContain('the facade material');

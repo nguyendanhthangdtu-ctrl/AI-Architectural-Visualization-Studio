@@ -60,6 +60,18 @@ describe('createVeoAdapter — submit() (real predictLongRunning call)', () => {
     await expect(adapter.submit(request)).rejects.toMatchObject({ code: 'VEO_PROVIDER_ERROR', retryable: true });
   });
 
+  it('BUILD 21: tags a 429 with the standardized PROVIDER_RATE_LIMITED category, and a 401 with PROVIDER_AUTH_FAILED', async () => {
+    const rateLimited = vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'quota exceeded' });
+    await expect(createVeoAdapter({ apiKey: 'k', fetchFn: rateLimited as unknown as typeof fetch }).submit(request)).rejects.toMatchObject({
+      providerCode: 'PROVIDER_RATE_LIMITED',
+    });
+
+    const unauthorized = vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', text: async () => 'bad key' });
+    await expect(createVeoAdapter({ apiKey: 'k', fetchFn: unauthorized as unknown as typeof fetch }).submit(request)).rejects.toMatchObject({
+      providerCode: 'PROVIDER_AUTH_FAILED',
+    });
+  });
+
   it('rejects when the API returns no operation name', async () => {
     const fetchFn = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     const adapter = createVeoAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch });

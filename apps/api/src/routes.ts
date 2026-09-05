@@ -38,7 +38,7 @@ import {
   type RunVideoRequest,
 } from './schemas.js';
 import { readBody } from './read-body.js';
-import { validateUpload, MAX_UPLOAD_SIZE_BYTES } from './upload-validation.js';
+import { isAllowedContentType, MAX_IMAGE_DIMENSION_PX, MAX_UPLOAD_SIZE_BYTES, readImageDimensions, validateUpload } from './upload-validation.js';
 import { buildAssetUrl } from './signed-asset-url.js';
 import { sendJson } from './http-utils.js';
 import type { AuthenticatedUser } from '@avs/project-core';
@@ -285,7 +285,14 @@ const RENDER_CORE_SELECTION: Record<RunGenerationRequest['renderCore'], RenderCo
   Auto: 'auto',
 };
 
-/** Decodes the `data:` URI a real adapter returns (BUILD 12) back into raw bytes for `AssetStore.put()`. */
+/**
+ * Decodes the `data:` URI a real adapter returns (BUILD 12) back into raw
+ * bytes for `AssetStore.put()`. Shared by image outputs (generation/edit) AND
+ * video outputs (Veo download, `video/mp4`) — this generic layer only checks
+ * the shape is real (a real `data:` URI, non-empty bytes); it never assumes
+ * "image," since a video is a perfectly valid, expected output here too.
+ * Format-specific validation (decodability, dimensions) is `validateImageOutput()`'s job, applied only at the two image call sites.
+ */
 function decodeDataUri(uri: string): { contentType: string; data: Uint8Array } {
   const match = /^data:([^;]+);base64,(.+)$/s.exec(uri);
   if (!match) {
@@ -295,7 +302,55 @@ function decodeDataUri(uri: string): { contentType: string; data: Uint8Array } {
       retryable: false,
     });
   }
-  return { contentType: match[1]!, data: new Uint8Array(Buffer.from(match[2]!, 'base64')) };
+  const contentType = match[1]!;
+  const data = new Uint8Array(Buffer.from(match[2]!, 'base64'));
+
+  if (data.length === 0) {
+    throw new DomainError({
+      code: 'GENERATION_OUTPUT_INVALID',
+      message: 'Adapter returned an empty output payload.',
+      retryable: false,
+    });
+  }
+
+  return { contentType, data };
+}
+
+/**
+ * BUILD 21 Phase 4 (Image Input/Output Pipeline) — validates a decoded
+ * generation/edit output is a real, decodable image before it ever reaches
+ * `AssetStore.put()`: a recognized image content type and parseable
+ * dimensions within the same sane bound upload validation already enforces
+ * (`readImageDimensions`, `upload-validation.ts` — reused, not duplicated,
+ * CLAUDE.md rule 9). A provider that returns text/an error/a truncated or
+ * corrupt payload instead of a real image is rejected here with a typed
+ * error, never silently persisted as a bogus "generated" asset. Not applied
+ * to video output (`video/mp4` is a valid, expected non-image content type).
+ */
+function validateImageOutput(decoded: { contentType: string; data: Uint8Array }): { contentType: string; data: Uint8Array } {
+  if (!isAllowedContentType(decoded.contentType)) {
+    throw new DomainError({
+      code: 'GENERATION_OUTPUT_INVALID',
+      message: `Adapter returned an unrecognized output content type "${decoded.contentType}".`,
+      retryable: false,
+    });
+  }
+  const dimensions = readImageDimensions(decoded.contentType, decoded.data);
+  if (!dimensions) {
+    throw new DomainError({
+      code: 'GENERATION_OUTPUT_INVALID',
+      message: `Adapter's output could not be decoded as a valid "${decoded.contentType}" image.`,
+      retryable: false,
+    });
+  }
+  if (dimensions.width > MAX_IMAGE_DIMENSION_PX || dimensions.height > MAX_IMAGE_DIMENSION_PX) {
+    throw new DomainError({
+      code: 'GENERATION_OUTPUT_INVALID',
+      message: `Adapter's output is ${dimensions.width}x${dimensions.height}px, exceeding the ${MAX_IMAGE_DIMENSION_PX}px limit per side.`,
+      retryable: false,
+    });
+  }
+  return decoded;
 }
 
 /**
@@ -344,9 +399,16 @@ async function submitGeneration(params: {
   resolution: string;
   sourceAsset: { ref: AssetRef; data: Uint8Array };
   referenceAssets: { ref: AssetRef; data: Uint8Array }[];
+  /**
+   * BUILD 21 (cost/duplicate-generation safety) — a client-supplied
+   * `Idempotency-Key` header value, when present. Falls back to a fresh,
+   * always-unique id, which preserves the exact prior behavior (a brand-new
+   * job every call) for any caller that never sends the header.
+   */
+  clientIdempotencyKey?: string | undefined;
 }): Promise<{ job: JobRecord; adapter: ImageGenerationAdapter; generationResult: GenerationResult; outputAssets: AssetRef[] }> {
   const { context, project, sourceAsset, referenceAssets } = params;
-  const requestId = randomUUID();
+  const requestId = params.clientIdempotencyKey ?? randomUUID();
   const generationRequest = {
     requestId,
     promptText: params.promptText,
@@ -367,26 +429,79 @@ async function submitGeneration(params: {
   }
 
   const job = await context.jobQueue.enqueue({ idempotencyKey: requestId });
+
+  // BUILD 21 — this exact Idempotency-Key already ran a real provider call to
+  // completion; replaying it would silently double-bill the provider (and
+  // could hand the caller a second, different image for a request it
+  // believes already succeeded once). Reuse the cached outcome instead of
+  // calling the provider again. A `'failed'` prior attempt is deliberately
+  // NOT short-circuited here — retrying a generation that never actually
+  // succeeded is the caller's legitimate, expected recovery path, not a
+  // duplicate-cost risk.
+  if (job.status === 'succeeded' && job.result) {
+    const cached = job.result as { generationResult: GenerationResult; outputAssets: AssetRef[] };
+    return { job, adapter, generationResult: cached.generationResult, outputAssets: cached.outputAssets };
+  }
+  if (job.status === 'running') {
+    throw new DomainError({
+      code: 'GENERATION_IN_PROGRESS',
+      message: 'A generation with this idempotency key is already in progress.',
+      retryable: true,
+    });
+  }
+
   await context.jobQueue.updateStatus(job.id, 'running');
 
   let generationResult: GenerationResult;
+  const startedAt = Date.now();
   try {
     generationResult = await adapter.generate(generationRequest);
   } catch (error) {
     await context.jobQueue.updateStatus(job.id, 'failed');
+    // BUILD 21 Phase 15 (Observability) — one structured, secret-free log
+    // line per failed attempt: requestId/provider/latency/failure category.
+    // Never the request/response bytes, never a raw provider error body
+    // (already sanitized upstream by each adapter's own classify function).
+    context.logger.error('AI provider generation attempt failed', {
+      requestId,
+      provider: adapter.id,
+      latencyMs: Date.now() - startedAt,
+      code: error instanceof DomainError ? error.code : 'INTERNAL_ERROR',
+      providerCode: error instanceof DomainError ? error.providerCode : undefined,
+    });
     throw error;
   }
+  context.logger.info('AI provider generation attempt completed', {
+    requestId,
+    provider: adapter.id,
+    latencyMs: Date.now() - startedAt,
+    outcome: generationResult.status,
+    outputCount: generationResult.outputAssetUrls.length,
+  });
 
   const outputAssets = await Promise.all(
     generationResult.outputAssetUrls.map(async (uri) => {
-      const decoded = decodeDataUri(uri);
+      const decoded = validateImageOutput(decodeDataUri(uri));
       return context.assetStore.put({ projectId: project.id, contentType: decoded.contentType, data: decoded.data });
     }),
   );
 
-  await context.jobQueue.updateStatus(job.id, generationResult.status === 'succeeded' ? 'succeeded' : 'failed');
+  const finalStatus = generationResult.status === 'succeeded' ? 'succeeded' : 'failed';
+  await context.jobQueue.updateStatus(job.id, finalStatus, finalStatus === 'succeeded' ? { generationResult, outputAssets } : undefined);
 
   return { job, adapter, generationResult, outputAssets };
+}
+
+/**
+ * BUILD 21 — reads an optional client-supplied `Idempotency-Key` request
+ * header (standard practice for cost-bearing generation endpoints). Absent
+ * for every existing caller/test, which keeps prior behavior (a fresh,
+ * always-unique id per call) exactly unchanged.
+ */
+function readIdempotencyKey(req: IncomingMessage): string | undefined {
+  const header = req.headers['idempotency-key'];
+  const value = Array.isArray(header) ? header[0] : header;
+  return value && value.trim() ? value.trim() : undefined;
 }
 
 /**
@@ -437,6 +552,7 @@ export async function handleRunGeneration(
     resolution: result.data.resolution,
     sourceAsset,
     referenceAssets,
+    clientIdempotencyKey: readIdempotencyKey(req),
   });
 
   const now = new Date().toISOString();
@@ -634,6 +750,7 @@ export async function handleRegenerate(
     resolution: result.data.resolution,
     sourceAsset,
     referenceAssets,
+    clientIdempotencyKey: readIdempotencyKey(req),
   });
 
   const now = new Date().toISOString();
@@ -746,6 +863,7 @@ export async function handleRunView(
     resolution: result.data.resolution,
     sourceAsset,
     referenceAssets,
+    clientIdempotencyKey: readIdempotencyKey(req),
   });
 
   const now = new Date().toISOString();
@@ -921,7 +1039,7 @@ export async function handleRunEdit(
 
   const outputAssets = await Promise.all(
     editResult.outputAssetUrls.map(async (uri) => {
-      const decoded = decodeDataUri(uri);
+      const decoded = validateImageOutput(decodeDataUri(uri));
       return context.assetStore.put({ projectId: project.id, contentType: decoded.contentType, data: decoded.data });
     }),
   );

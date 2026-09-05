@@ -1,4 +1,4 @@
-import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
+import { classifyProviderHttpStatus, DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 import { fieldKeysForPurpose, filterFieldsForPurpose } from './reference-field-vocabulary.js';
 import { referenceVisualLanguageResponseSchema } from './reference-visual-language-schema.js';
 import type {
@@ -106,11 +106,12 @@ function buildResponseJsonSchema(purpose: ReferencePurpose): Record<string, unkn
 }
 
 function classifyGeminiError(status: number, message: string): DomainError {
-  const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
+  const { category, retryable } = classifyProviderHttpStatus(status);
   return new DomainError({
     code: 'REFERENCE_PROVIDER_ERROR',
     message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`,
     retryable,
+    providerCode: category,
   });
 }
 

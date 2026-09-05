@@ -34,8 +34,8 @@ import {
 } from '@avs/storage-adapters';
 import type { AiQc, ReferenceIntelligence, VisionAnalysisEngine } from '@avs/ai-core';
 import { createGeminiQcEngine, createGeminiReferenceIntelligenceEngine, createGeminiVisionAnalysisEngine } from '@avs/ai-core';
-import type { RateLimiter } from '@avs/shared';
-import { createInMemoryRateLimiter } from '@avs/shared';
+import type { Logger, RateLimiter } from '@avs/shared';
+import { createConsoleLogger, createInMemoryRateLimiter } from '@avs/shared';
 import {
   createChatGPTImageAdapter,
   createNanoBananaAdapter,
@@ -102,6 +102,28 @@ export interface AppContext {
   passwordResetRateLimiter: RateLimiter;
   /** Defaults to `DEFAULT_RESET_TOKEN_TTL_MS` (1 hour, auth-routes.ts); overridable only so tests can exercise real expiry with a real, tiny delay instead of mocking time around a live HTTP server. */
   passwordResetTokenTtlMs: number;
+  /**
+   * BUILD 21 (Production AI Provider Integration, Phase 6) — whether each AI
+   * provider has a real API key configured. Booleans only, never the key
+   * itself; read by `GET /ready` to report configuration state without ever
+   * conflating "a credential is present" with "this provider has been
+   * verified against a live request" (see readiness.ts's own doc comment).
+   */
+  providerConfiguration: Readonly<{
+    gemini: boolean;
+    nanoBanana: boolean;
+    chatgptImage: boolean;
+    veo: boolean;
+  }>;
+  /**
+   * BUILD 21 Phase 15 (Observability) — used by `routes.ts`'s generation path
+   * to emit one structured, secret-free log line per attempt (requestId,
+   * provider, model, latency, outcome). Defaults to the same
+   * `createConsoleLogger()` `server.ts` itself uses for error logging, so
+   * production behavior is unchanged unless a caller overrides it (tests do,
+   * to assert on emitted log content without touching real stdout).
+   */
+  logger: Logger;
 }
 
 /**
@@ -135,6 +157,8 @@ export function createAppContext(
     /** Defaults to `InMemoryEmailSender` — see its own doc comment; a real vendor wires a real `EmailSender` in here once chosen. */
     emailSender?: EmailSender | undefined;
     passwordResetTokenTtlMs?: number | undefined;
+    /** BUILD 21 — defaults to `createConsoleLogger()`; tests override this to assert on emitted log content. */
+    logger?: Logger | undefined;
   } = {},
 ): AppContext {
   const db = new SqliteDatabase(config.dbPath ?? ':memory:');
@@ -178,5 +202,12 @@ export function createAppContext(
     emailSender: config.emailSender ?? new InMemoryEmailSender(),
     passwordResetRateLimiter: createInMemoryRateLimiter(PASSWORD_RESET_RATE_LIMIT),
     passwordResetTokenTtlMs: config.passwordResetTokenTtlMs ?? DEFAULT_RESET_TOKEN_TTL_MS,
+    providerConfiguration: {
+      gemini: Boolean(config.geminiApiKey),
+      nanoBanana: Boolean(config.nanoBananaApiKey),
+      chatgptImage: Boolean(config.chatgptImageApiKey),
+      veo: Boolean(config.veoApiKey),
+    },
+    logger: config.logger ?? createConsoleLogger(),
   };
 }

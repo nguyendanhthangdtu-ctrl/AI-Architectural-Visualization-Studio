@@ -1601,3 +1601,64 @@ therefore genuinely BLOCKED / EXTERNAL DEPENDENCY, not merely untested.
   distance to PRODUCTION READY is unchanged from BUILD 19's own conclusion and is entirely external:
   one real AI provider credential exercised once, a real email vendor, and — only if the operator wants to
   leave node:sqlite/local-disk — a real managed DB/object-store.
+
+## 35. BUILD 21 Production AI Provider Integration & Real Generation Validation Record
+
+Full architecture/flow writeup: `docs/BUILD_21_PRODUCTION_INTEGRATION.md`. Operator runbook:
+`docs/BUILD_21_OPERATOR_RUNBOOK.md`. This gate closed real, verified structural gaps in the AI provider
+integration path — it did NOT close the credential gap, because none exists in this environment (confirmed
+directly against `process.env`, not assumed) and none was fabricated.
+
+- **Standardized error taxonomy** (`packages/shared/src/provider-error-category.ts`, new) — every one of the
+  six AI provider adapters' classify functions now also sets `ErrorEnvelope.providerCode` (a field the type
+  already reserved for exactly this, previously unused) to one of `PROVIDER_AUTH_FAILED` /
+  `PROVIDER_RATE_LIMITED` / `PROVIDER_TIMEOUT` / `PROVIDER_UNAVAILABLE` / `PROVIDER_INVALID_REQUEST` /
+  `PROVIDER_BAD_RESPONSE`, derived from the real upstream HTTP status. Purely additive — every adapter's
+  existing top-level `code` (`NANO_BANANA_PROVIDER_ERROR`, `VEO_PROVIDER_ERROR`, etc.) is unchanged, so no
+  existing error-handling mapping or test broke.
+- **Real duplicate-generation/cost-safety fix** (`apps/api/src/job-queue.ts`, `routes.ts`) — `JobQueue` had
+  per-idempotency-key dedup logic since BUILD 13 that was never actually wired to anything: the key passed in
+  was always a fresh `randomUUID()` per call, so no two calls could ever collide, and a returned pre-existing
+  `JobRecord` was ignored regardless (the provider was always called again). `POST
+  /projects/:id/generations`/`/views` now accept an optional client `Idempotency-Key` header; a request
+  matching an already-`succeeded` job returns the cached `{generationResult, outputAssets}` (now stored on
+  `JobRecord.result`) without calling the provider again, and a request matching a still-`running` job is
+  rejected `409 GENERATION_IN_PROGRESS` rather than starting a second concurrent call. Absent the header
+  (every existing caller, `apps/web` included) behavior is byte-identical to BUILD 20. Deliberately not wired
+  into `apps/web` yet — `apiFetch()` has no automatic retry today, so a header sent from the only real caller
+  would always be a fresh key, i.e. inert; the mechanism is real and ready for whichever future caller
+  actually retries.
+- **Real output-validation gap closed** (`routes.ts`'s `decodeDataUri`/new `validateImageOutput`) — provider
+  image output was previously only checked for `data:` URI *shape*, never confirmed to be an actual,
+  decodable image; a provider returning corrupt/truncated/non-image bytes inside a well-formed wrapper would
+  have been silently persisted as a "generated" asset. `validateImageOutput()` now reuses upload validation's
+  own `readImageDimensions()` (`upload-validation.ts`, exported for this reuse — CLAUDE.md rule 9, never
+  duplicated) against the two image-output call sites (generation, edit) — deliberately NOT applied to the
+  video-download call site, since `video/mp4` is a real, expected non-image output there. Rejects with a typed
+  `GENERATION_OUTPUT_INVALID` (502, newly mapped in `error-handling.ts`). Fixing this surfaced that five
+  existing test files' fake adapters returned a placeholder text string as their "image" output
+  (`"fake-generated-image"`) — all five were updated to a real, minimal, valid PNG byte string instead (the
+  same `ONE_PIXEL_PNG` fixture already used for uploads elsewhere in those files); no assertion was weakened.
+- **`GET /ready` gained provider configuration status** (`readiness.ts`, `app-context.ts`'s new
+  `providerConfiguration`) — reports `{gemini,nanoBanana,chatgptImage,veo}.configured: boolean` (key-presence
+  only, booleans never the key itself). Deliberately never called "ready"/"operational"/"verified" — this
+  repository has no live-verification tracking, so key presence is never conflated with proof a provider
+  actually works; that evidence can only come from `live-provider-smoke.test.ts` actually passing. Provider
+  configuration deliberately does not affect overall `/ready` `status` — a deployment with no AI key yet can
+  still be `ready` for auth/asset/DB traffic.
+- **New observability** (`AppContext.logger`, new; `submitGeneration()`) — one structured, secret-free log
+  line per generation attempt (requestId, provider, latencyMs, outcome/failure category) — previously the
+  generation path emitted no success-path log at all. Reuses the existing `Logger` interface/redaction
+  (BUILD 18) — no new logging dependency.
+- **Live AI provider**: unchanged from BUILD 20 — zero credentials exist in this environment for any of
+  Gemini/Nano Banana/ChatGPT Image/Veo/Google Flow/Sora, so none was exercised live. No fabricated success is
+  claimed anywhere in this build.
+- **527/527 tests pass, 1 correctly skipped** (was 514 at the end of BUILD 20 — +13 new tests: the error
+  taxonomy, the idempotency fix (including a real concurrent-request race test), the output-validation
+  rejection paths, and the new readiness provider-status field); typecheck, lint, and production build all
+  clean; the built `apps/web` bundle was grepped for every provider key/secret name — zero matches.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, not PRODUCTION READY. Every structural gap
+  this build's spec named that could be closed without a real credential was closed and tested; the remaining
+  gap is exclusively the same external dependency BUILD 19/20 already named: at least one real AI provider key
+  exercised once via `live-provider-smoke.test.ts`, plus a real email vendor if password recovery must deliver
+  real email in production.

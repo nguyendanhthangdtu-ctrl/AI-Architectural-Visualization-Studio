@@ -86,7 +86,11 @@ const FIVE_LOCKS = [
   { id: 'lighting', enabled: false },
 ];
 
-function fakeAdapter(id: string, outputData = 'ZmFrZS1nZW5lcmF0ZWQ='): ImageGenerationAdapter {
+// BUILD 21: a real, valid 1x1 PNG default — output validation now requires a genuinely decodable image.
+function fakeAdapter(
+  id: string,
+  outputData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+): ImageGenerationAdapter {
   return {
     id,
     capabilities: () => ({ maxResolution: '2K', supportedAspectRatios: ['2:3'], supportsEdit: false, supportsUpscale: false }),

@@ -19,12 +19,21 @@ export interface JobRecord {
   idempotencyKey: string;
   status: JobStatus;
   createdAt: string;
+  /**
+   * BUILD 21 (Production AI Provider Integration, cost/duplicate-generation
+   * safety) — the cached outcome once this idempotency key has fully
+   * completed once. Lets a caller (`routes.ts`'s `submitGeneration`) replay a
+   * client-retried request against the exact same result instead of calling
+   * a real, possibly-billed provider a second time for a request that
+   * already succeeded once.
+   */
+  result?: unknown;
 }
 
 export interface JobQueue {
   enqueue(params: { idempotencyKey: string }): Promise<JobRecord>;
   getStatus(id: string): Promise<JobRecord | null>;
-  updateStatus(id: string, status: JobStatus): Promise<JobRecord>;
+  updateStatus(id: string, status: JobStatus, result?: unknown): Promise<JobRecord>;
 }
 
 export class InMemoryJobQueue implements JobQueue {
@@ -53,12 +62,12 @@ export class InMemoryJobQueue implements JobQueue {
     return this.jobs.get(id) ?? null;
   }
 
-  async updateStatus(id: string, status: JobStatus): Promise<JobRecord> {
+  async updateStatus(id: string, status: JobStatus, result?: unknown): Promise<JobRecord> {
     const existing = this.jobs.get(id);
     if (!existing) {
       throw new DomainError({ code: 'JOB_NOT_FOUND', message: `No job with id ${id}`, retryable: false });
     }
-    const updated = { ...existing, status };
+    const updated = { ...existing, status, ...(result !== undefined ? { result } : {}) };
     this.jobs.set(id, updated);
     return updated;
   }

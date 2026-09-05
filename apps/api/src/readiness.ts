@@ -18,11 +18,34 @@ export interface ReadinessCheck {
   status: 'ok' | 'error';
 }
 
+/**
+ * BUILD 21 (Production AI Provider Integration, Phase 6) — `configured`
+ * means only "a credential is present in this process's configuration."
+ * It is DELIBERATELY not called "ready," "operational," or "verified": this
+ * repository has no live-verification tracking (no persisted "last
+ * successful real provider call" state), so presence of an API key is never
+ * treated here as proof the provider actually works. That evidence can only
+ * ever come from an actual successful request — see
+ * `live-provider-smoke.test.ts` and docs/BUILD_21_OPERATOR_RUNBOOK.md.
+ * Provider configuration deliberately does NOT affect the overall `status`
+ * below — a deployment with no AI provider key yet can still be `ready` for
+ * auth/asset/DB traffic; only a missing DB/asset-store dependency does.
+ */
+export interface ProviderConfigurationCheck {
+  configured: boolean;
+}
+
 export interface ReadinessResult {
   status: 'ready' | 'not_ready';
   checks: {
     database: ReadinessCheck;
     assetStore: ReadinessCheck;
+  };
+  providers: {
+    gemini: ProviderConfigurationCheck;
+    nanoBanana: ProviderConfigurationCheck;
+    chatgptImage: ProviderConfigurationCheck;
+    veo: ProviderConfigurationCheck;
   };
 }
 
@@ -40,7 +63,16 @@ export async function checkReadiness(context: AppContext): Promise<ReadinessResu
     .catch(() => ({ status: 'error' as const }));
 
   const status: ReadinessResult['status'] = database.status === 'ok' && assetStore.status === 'ok' ? 'ready' : 'not_ready';
-  return { status, checks: { database, assetStore } };
+  return {
+    status,
+    checks: { database, assetStore },
+    providers: {
+      gemini: { configured: context.providerConfiguration.gemini },
+      nanoBanana: { configured: context.providerConfiguration.nanoBanana },
+      chatgptImage: { configured: context.providerConfiguration.chatgptImage },
+      veo: { configured: context.providerConfiguration.veo },
+    },
+  };
 }
 
 export async function handleReadiness(res: ServerResponse, context: AppContext): Promise<void> {

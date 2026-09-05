@@ -1,4 +1,4 @@
-import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
+import { classifyProviderHttpStatus, DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 import type {
   AdapterCapabilities,
@@ -56,11 +56,12 @@ function mapResolutionToQuality(resolution: string): 'low' | 'medium' | 'high' |
 }
 
 function classifyOpenAiError(status: number, message: string): NormalizedAdapterError {
-  const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
+  const { category, retryable } = classifyProviderHttpStatus(status);
   return {
     code: 'CHATGPT_IMAGE_PROVIDER_ERROR',
     message: `OpenAI Images API error (${status}): ${sanitizeProviderErrorBody(message)}`,
     retryable,
+    providerCode: category,
   };
 }
 

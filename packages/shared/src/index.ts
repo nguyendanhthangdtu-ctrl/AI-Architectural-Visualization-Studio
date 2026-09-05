@@ -4,6 +4,7 @@ export * from './env.js';
 export * from './logger.js';
 export * from './language.js';
 export * from './provider-error-sanitizer.js';
+export * from './provider-error-category.js';
 export * from './rate-limiter.js';
 export * from './metrics.js';
 export * from './fetch-timeout.js';

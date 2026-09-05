@@ -13,7 +13,9 @@ function fakeNanoBananaAdapter(): ImageGenerationAdapter {
     validate: () => ({ valid: true, errors: [] }),
     generate: async () => ({
       status: 'succeeded',
-      outputAssetUrls: ['data:image/png;base64,ZmFrZS1nZW5lcmF0ZWQ='],
+      // BUILD 21: a real, valid 1x1 PNG — output validation now requires a
+      // genuinely decodable image, not an arbitrary placeholder string.
+      outputAssetUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
       usageMetadata: { adapter: 'nano-banana', model: 'fake-model' },
     }),
     normalizeError: (e) => ({ code: 'FAKE_ERROR', message: String(e), retryable: false }),

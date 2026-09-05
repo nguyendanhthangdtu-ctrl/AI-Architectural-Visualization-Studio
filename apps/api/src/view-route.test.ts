@@ -31,7 +31,9 @@ function fakeSucceedingAdapter(id: string): ImageGenerationAdapter {
     validate: (request) => ({ valid: request.sourceAssets.length > 0 && Boolean(request.promptText.trim()), errors: [] }),
     generate: async (request) => ({
       status: 'succeeded',
-      outputAssetUrls: ['data:image/png;base64,ZmFrZS12aWV3LWltYWdl'],
+      // BUILD 21: a real, valid 1x1 PNG — output validation now requires a
+      // genuinely decodable image, not an arbitrary placeholder string.
+      outputAssetUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
       usageMetadata: { adapter: id, model: 'fake-model', requestId: request.requestId },
     }),
     normalizeError: (e) => ({ code: 'FAKE_ERROR', message: String(e), retryable: false }),
@@ -105,7 +107,9 @@ describe('apps/api view route (BUILD 15 Multi-View / Sync / Creative View)', () 
     expect(storedView).toMatchObject({ mode: 'sync', resultingGenerationId: body.generationId });
 
     const outputRes = await fetch(`${baseUrl}${body.outputAssetUrls[0]}`, withCookie({}, session.cookie));
-    expect(Buffer.from(await outputRes.arrayBuffer()).toString('base64')).toBe('ZmFrZS12aWV3LWltYWdl');
+    expect(Buffer.from(await outputRes.arrayBuffer()).toString('base64')).toBe(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
   });
 
   it('runs a Creative View with material/lighting/style proposals recorded verbatim', async () => {

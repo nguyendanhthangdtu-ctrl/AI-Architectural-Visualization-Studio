@@ -1,4 +1,4 @@
-import { DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
+import { classifyProviderHttpStatus, DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 import type {
   AdapterCapabilities,
@@ -35,8 +35,13 @@ export interface NanoBananaAdapterConfig {
 }
 
 function classifyGeminiError(status: number, message: string): NormalizedAdapterError {
-  const retryable = status === 429 || status === 503 || status === 408 || status >= 500;
-  return { code: 'NANO_BANANA_PROVIDER_ERROR', message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`, retryable };
+  const { category, retryable } = classifyProviderHttpStatus(status);
+  return {
+    code: 'NANO_BANANA_PROVIDER_ERROR',
+    message: `Gemini API error (${status}): ${sanitizeProviderErrorBody(message)}`,
+    retryable,
+    providerCode: category,
+  };
 }
 
 function toImagePart(img: { data: Uint8Array; contentType: string }) {

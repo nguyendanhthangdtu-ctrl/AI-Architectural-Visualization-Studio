@@ -11,7 +11,8 @@ export type AllowedImageContentType = (typeof ALLOWED_IMAGE_CONTENT_TYPES)[numbe
 export const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB — generous for a viewport render export
 export const MAX_IMAGE_DIMENSION_PX = 16000; // guards against decompression-bomb-style dimension abuse
 
-function isAllowedContentType(contentType: string): contentType is AllowedImageContentType {
+/** Exported (BUILD 21) so the generation-output decoder can reuse the exact same allowlist — never duplicated (CLAUDE.md rule 9). */
+export function isAllowedContentType(contentType: string): contentType is AllowedImageContentType {
   return (ALLOWED_IMAGE_CONTENT_TYPES as readonly string[]).includes(contentType);
 }
 
