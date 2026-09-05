@@ -29,6 +29,11 @@ const HTTP_STATUS_BY_CODE: Readonly<Record<string, number>> = {
   QC_PROVIDER_ERROR: 502, // apps/api acting as gateway to an upstream (Gemini) that failed
   INVALID_ASSET_SIGNATURE: 403, // signed asset URL missing/invalid/expired (docs/03 §9, BUILD 18)
   RATE_LIMITED: 429, // docs/16 "Rate limit expensive AI endpoints" (BUILD 18)
+  UNAUTHENTICATED: 401, // RELEASE 02 — no/invalid/expired session
+  INVALID_CREDENTIALS: 401, // RELEASE 02 — wrong email or password (never says which)
+  REGISTRATION_DISABLED: 403, // RELEASE 02 — no REGISTRATION_SECRET configured on this deployment
+  REGISTRATION_FORBIDDEN: 403, // RELEASE 02 — wrong registration secret
+  EMAIL_ALREADY_REGISTERED: 409, // RELEASE 02
 };
 
 export function toErrorEnvelope(error: unknown): { httpStatus: number; envelope: ErrorEnvelope } {

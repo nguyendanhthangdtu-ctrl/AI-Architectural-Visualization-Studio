@@ -12,6 +12,28 @@ export const createProjectRequestSchema = z.object({
 
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 
+/**
+ * RELEASE 02 (Security & Production Access Hardening) — real accounts.
+ * `registrationSecret` gates self-registration for a private deployment
+ * (docs/16); a real minimum length on `password` (not just "non-empty") is
+ * the one strength rule enforced at this boundary — real password-strength
+ * scoring is out of scope for this release.
+ */
+export const registerRequestSchema = z.object({
+  email: z.string().trim().min(1, 'email must not be empty').email('email must be a valid email address'),
+  password: z.string().min(8, 'password must be at least 8 characters'),
+  registrationSecret: z.string().min(1, 'registrationSecret must not be empty'),
+});
+
+export type RegisterRequest = z.infer<typeof registerRequestSchema>;
+
+export const loginRequestSchema = z.object({
+  email: z.string().trim().min(1, 'email must not be empty'),
+  password: z.string().min(1, 'password must not be empty'),
+});
+
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
 /** docs/01 MVP step 4 "Run 12-layer AI analysis" (BUILD 07). */
 export const runAnalysisRequestSchema = z.object({
   assetId: z.string().trim().min(1, 'assetId must not be empty'),

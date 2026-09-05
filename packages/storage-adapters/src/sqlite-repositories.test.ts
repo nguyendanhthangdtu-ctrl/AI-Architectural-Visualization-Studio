@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectId, Timestamp } from '@avs/shared';
+import type { ProjectId, Timestamp, UserId } from '@avs/shared';
 import { SqliteDatabase } from './sqlite-database.js';
-import { SqliteAnalysisRepository, SqliteAuditLogRepository, SqliteProjectRepository, SqliteVersionRepository } from './sqlite-repositories.js';
+import {
+  SqliteAnalysisRepository,
+  SqliteAuditLogRepository,
+  SqliteProjectRepository,
+  SqliteSessionRepository,
+  SqliteUserRepository,
+  SqliteVersionRepository,
+} from './sqlite-repositories.js';
 
 /** Every test opens a fresh `:memory:` database — real SQLite, ephemeral, same speed/isolation as the old in-memory Maps. */
 function freshDb(): SqliteDatabase {
@@ -13,6 +20,7 @@ describe('SqliteProjectRepository', () => {
     const repo = new SqliteProjectRepository(freshDb());
     const project = {
       id: 'p1' as ProjectId,
+      ownerId: 'u1' as never,
       name: 'Villa A',
       module: 'architecture' as const,
       createdAt: '2026-09-04T00:00:00.000Z' as Timestamp,
@@ -32,6 +40,7 @@ describe('SqliteProjectRepository', () => {
     const repo = new SqliteProjectRepository(db);
     const project = {
       id: 'p1' as ProjectId,
+      ownerId: 'u1' as never,
       name: 'Villa A',
       module: 'architecture' as const,
       createdAt: 't' as Timestamp,
@@ -120,6 +129,42 @@ describe('SqliteAuditLogRepository', () => {
   });
 });
 
+describe('SqliteUserRepository (RELEASE 02)', () => {
+  it('round-trips a user by id and by email (case-insensitively)', async () => {
+    const repo = new SqliteUserRepository(freshDb());
+    const user = { id: 'u1' as UserId, email: 'Owner@Example.com', passwordHash: 'salt:hash', createdAt: 't' as Timestamp };
+    await repo.create(user);
+    await expect(repo.getById('u1' as UserId)).resolves.toEqual(user);
+    await expect(repo.getByEmail('owner@example.com')).resolves.toEqual(user);
+    await expect(repo.getByEmail('OWNER@EXAMPLE.COM')).resolves.toEqual(user);
+  });
+
+  it('rejects creating a second user with the same email', async () => {
+    const repo = new SqliteUserRepository(freshDb());
+    await repo.create({ id: 'u1' as UserId, email: 'dup@example.com', passwordHash: 'x', createdAt: 't' as Timestamp });
+    await expect(
+      repo.create({ id: 'u2' as UserId, email: 'dup@example.com', passwordHash: 'y', createdAt: 't' as Timestamp }),
+    ).rejects.toMatchObject({ code: 'EMAIL_ALREADY_REGISTERED' });
+  });
+
+  it('returns null for an unknown id/email rather than throwing', async () => {
+    const repo = new SqliteUserRepository(freshDb());
+    await expect(repo.getById('missing' as UserId)).resolves.toBeNull();
+    await expect(repo.getByEmail('nobody@example.com')).resolves.toBeNull();
+  });
+});
+
+describe('SqliteSessionRepository (RELEASE 02)', () => {
+  it('round-trips a session and supports real deletion (logout)', async () => {
+    const repo = new SqliteSessionRepository(freshDb());
+    const session = { id: 'sess-1', userId: 'u1' as UserId, createdAt: 't' as Timestamp, expiresAt: 'later' as Timestamp };
+    await repo.create(session);
+    await expect(repo.getById('sess-1')).resolves.toEqual(session);
+    await repo.deleteById('sess-1');
+    await expect(repo.getById('sess-1')).resolves.toBeNull();
+  });
+});
+
 describe('real durability across a database re-open (the actual point of the SQLite swap)', () => {
   it('survives closing and re-opening the same file-backed database', async () => {
     const { mkdtempSync, rmSync } = await import('node:fs');
@@ -132,6 +177,7 @@ describe('real durability across a database re-open (the actual point of the SQL
       const repo1 = new SqliteProjectRepository(db1);
       await repo1.create({
         id: 'p1' as ProjectId,
+        ownerId: 'u1' as never,
         name: 'Villa A',
         module: 'architecture' as const,
         createdAt: 't' as Timestamp,

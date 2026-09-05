@@ -390,8 +390,10 @@ Explicitly deferred — not ambiguous, just not yet due:
 - Concrete cloud/hosting provider and IaC tooling — still open (no account/credentials to wire against).
 - Concrete job queue technology behind the `JobQueue` interface (still `InMemoryJobQueue`, single-process
   only) — still open; a real multi-instance deployment needs a shared backend (Redis/SQS/etc.).
-- Concrete auth provider/strategy and session model — still fully absent (BUILD 18 audit reconfirmed zero
-  auth exists anywhere); still open.
+- **Resolved at RELEASE 02**: real accounts/session model — email+password (real scrypt hashing), real
+  server-side revocable sessions via an HTTP-only `SameSite=Strict` cookie, real per-project ownership
+  enforcement (§32). A managed identity provider (Auth0/Clerk/etc.) stays a real, still-open future decision,
+  behind the same `UserRepository`/`SessionRepository` interfaces.
 - Exact request/response schemas for NanoBanana, Google Flow, and ChatGPT Image adapters — validated
   against each provider's current official documentation at BUILD 12, not fabricated in this document.
 - Concrete observability vendor/stack — BUILD 18 added vendor-agnostic HTTP-request counters
@@ -1371,11 +1373,100 @@ decisions, not fabricated integrations (CLAUDE.md rule 7).
   asset were still there — real durability across a restart, the actual point of this tier.
 - **447/447 tests pass** (was 426 at the end of BUILD 17); typecheck and lint clean across the whole
   workspace.
-- **Explicitly out of scope** (documented, not silently skipped): auth (still fully absent — no route reads
-  a session/token anywhere, same as every prior gate's "no auth yet, BUILD 02 deferral"); a managed cloud
+- **Explicitly out of scope** (documented, not silently skipped): auth (still fully absent at the time this
+  gate closed — **resolved at RELEASE 02, §32**, not by any later BUILD); a managed cloud
   DB/blob/queue/observability vendor and a real cloud hosting target (§13 — genuinely needs the product
   owner's account/credentials, not fabricatable); dev-tooling dependency vulnerabilities in the `vite`/
   `esbuild`/`vitest` chain found during the pre-gate audit (fixing them needs a breaking `vite@8` upgrade,
   a separate, deliberate decision, not bundled into this gate); rate limiting/audit logging are per-process
   only (a real multi-instance deployment needs a shared backend behind the same interfaces, same as
   `JobQueue` already documents for itself).
+
+## 32. RELEASE 02 Security & Production Access Hardening Implementation Record
+
+A post-MVP hardening release (docs/19's BUILD 00-18 gate sequence was already complete and PASS) commissioned
+by the product owner after a RELEASE 01 production-readiness audit named the same gap this gate closes: zero
+authentication/authorization existed anywhere, and BUILD 18's rate limiting/audit log/CORS/signed URLs all
+had nothing behind them to actually gate access to. Scope, per the product owner's explicit constraints: no
+managed cloud infrastructure, no fabricated credentials, no rebuild of BUILD 00-18, no SQLite/local-disk swap.
+
+- **Real accounts** (`User`/`AuthenticatedUser`, `packages/project-core/src/user.ts`; `SqliteUserRepository`,
+  storage-adapters) — email + password, hashed with `scrypt` (Node's built-in, memory-hard KDF —
+  `apps/api/src/auth/password.ts` — no new dependency, same "zero external vendor" pattern BUILD 18 already
+  established for storage). `POST /auth/register` is gated by a shared `REGISTRATION_SECRET` — unset,
+  registration is entirely disabled (deny-by-default for a private deployment, never open public
+  self-registration); this is an invite gate, not a per-user password.
+- **Real sessions** (`Session`, `SqliteSessionRepository`; `apps/api/src/auth/session.ts`) — the session id is
+  a 256-bit random opaque token, never a self-verifying JWT: every request re-checks the
+  `SessionRepository` row, so logout/expiry are real and immediate. Carried in an `HttpOnly`,
+  `SameSite=Strict` cookie. `SameSite=Strict` is safe (not merely convenient) because this release also makes
+  `apps/web`↔`apps/api` same-origin by design — a dev-time Vite proxy (`apps/web/vite.config.ts`) and, in
+  production, the same reverse proxy §11 already requires for TLS — so every real request is same-site.
+- **Real authorization** (`resolveOwnedProjectOrThrow()`, `apps/api/src/routes.ts`) — `Project` gained a real
+  `ownerId: UserId` field, set only from the session-derived user at creation, never a client-supplied value.
+  Every project-scoped route (all of them) resolves ownership through one shared helper; a project that
+  exists but belongs to someone else returns the exact same `PROJECT_NOT_FOUND` as one that doesn't exist —
+  never leaks existence to a non-owner (IDOR-safe by construction, not by convention). `GET /assets/:id` has
+  no `:projectId` in its own URL, so its ownership check resolves via the asset's own recorded `projectId` —
+  and now runs *both* the BUILD 18 signature check and this new ownership check, independently; either one
+  failing rejects the request.
+- **Central enforcement, not per-route** (`apps/api/src/server.ts`) — a hardcoded public allowlist (`GET
+  /health`, `GET /metrics`, `POST /auth/register`, `POST /auth/login`; `OPTIONS` is answered before any of
+  this for CORS preflight) is checked first; every other path calls `requireAuth()` exactly once, before route
+  matching even happens — deliberately: an unauthenticated request to a route that doesn't exist gets `401`,
+  not a route-existence-revealing `404` (verified live and in `server.test.ts`).
+- **Rate limiting re-keyed** (`apps/api/src/rate-limit-middleware.ts`) — BUILD 18's limiter was IP-keyed
+  (no auth existed yet); now that real auth exists, AI-cost routes key by the authenticated user's id (the
+  "per user" docs/09/§9 always asked for, finally real) — verified two different accounts are limited
+  independently, not globally. `/auth/register`/`/auth/login` stay IP-keyed against a separate, tighter
+  limiter (`AUTH_ROUTE_RATE_LIMIT`, 10/min) — they can never have a user id yet by definition.
+- **Security response headers** (`apps/api/src/security-headers.ts`) — `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, and
+  `Content-Security-Policy: default-src 'none'` (correct, not a compromise: this API never serves HTML/JS
+  meant to be rendered as a page). `Strict-Transport-Security` is sent only when `TRUST_HTTPS=true` — this
+  app never fakes a TLS assumption it can't back up; sending HSTS over plain HTTP would be actively wrong.
+- **`TRUST_HTTPS`** (env.ts) — one new boolean env var (real `"true"`/`"false"` parsing, not zod's
+  `z.coerce.boolean()` — that treats the literal string `"false"` as truthy, a well-known footgun this
+  deliberately avoids) gates both the cookie's `Secure` attribute and HSTS. Defaults `false` so local dev over
+  plain HTTP keeps working with zero configuration.
+- **`.gitignore` closed the RELEASE 01 finding for real**: `/data/`, `**/data/`, `*.sqlite3*`, `*.db*`,
+  `tmp/`, `.tmp/` — the documented default `DATABASE_URL`/`ASSET_STORE_URL` paths (and any project
+  subdirectory choosing the same convention) can no longer be committed by accident.
+- **Real tooling migration handled mechanically, not by hand-waving**: every BUILD 06-18 route-level
+  integration test called `fetch()` with no session and would have failed the moment auth was enforced. A
+  shared `apps/api/src/test-helpers/auth.ts` (`registerTestUser()`, `withCookie()`) was established in
+  `routes.test.ts` first, then applied identically across `analysis-route.test.ts`,
+  `reference-route.test.ts`, `generation-route.test.ts`, `generation-qc-route.test.ts`, `edit-route.test.ts`,
+  `view-route.test.ts`, `video-route.test.ts` — zero assertions/status codes/error codes changed, only real
+  auth plumbing added, preserving every prior gate's actual test coverage rather than reducing it.
+- **New dedicated coverage**: `apps/api/src/auth/auth-routes.test.ts` (register/login/logout/me, safe
+  generic credential errors, rate limiting), `apps/api/src/authorization.test.ts` (two real accounts,
+  cross-user IDOR on projects/assets/uploads/analysis, client-supplied `ownerId` ignored), `apps/api/src/
+  security-hardening.test.ts` (security headers, HSTS/Secure-cookie gating, path traversal, per-user rate
+  limiting, secret redaction).
+- **`apps/web` gained a real sign-in gate** (`AuthGate`, `App.tsx`) — every mount now checks `GET /auth/me`
+  once before rendering anything else: `'checking'` renders nothing (never flashes the gate for an
+  already-signed-in user on reload), `'signedOut'` renders `AuthGate` (a real sign-in/register form, the
+  register mode only ever offered as a toggle — it still fails honestly server-side if `REGISTRATION_SECRET`
+  isn't configured or doesn't match) and never the real app underneath it, `'signedIn'` renders the app
+  exactly as before. `client.ts`'s `API_BASE_URL` now defaults to a relative (same-origin) path and every
+  request sets `credentials: 'include'`. `Header` gained a real "Sign out" action that clears the whole
+  client-side session state, not just `currentUser`.
+- **Verified live**: built and ran the real server with `REGISTRATION_SECRET`/`TRUST_HTTPS`/
+  `ASSET_URL_SIGNING_SECRET`/`ALLOWED_ORIGINS`/`DATABASE_URL`/`ASSET_STORE_URL` all set to real values —
+  registered two real accounts, confirmed an unauthenticated request to a protected route is rejected (401),
+  confirmed account B cannot read/see account A's project (404, not leaked), confirmed account B cannot
+  fetch account A's asset even with A's exact valid signed URL (404 — ownership gates independently of the
+  signature), confirmed a request with no signature at all is still rejected (403) even on the owner's own
+  session, confirmed real security headers and CORS allow/reject, confirmed login/register rate limiting
+  (429 after repeated attempts, including correctly rate-limiting a subsequent *legitimate* login attempt
+  from the same source — the real, intended behavior of a hard rate limit).
+- **487/487 tests pass** (was 447 at the end of BUILD 18); typecheck, lint, and production build all clean;
+  `git diff --check` reported no whitespace errors.
+- **Explicitly out of scope** (documented, not silently skipped): a managed identity provider (§13); a
+  password-reset/email-verification flow (none exists — an operator who loses a password today has no
+  self-service recovery path, only re-registration under a new email if registration is still open); TLS
+  itself (§11 — a reverse proxy's job, never faked here); the dev-tooling vulnerability chain from BUILD 18's
+  audit (unchanged, still needs a deliberate `vite@8` upgrade); defense-in-depth path validation inside
+  `LocalDiskAssetStore` itself (not reachable today — the HTTP route regex and WHATWG URL normalization
+  already prevent a slash from ever reaching it — flagged as a nice-to-have, not a real gap).

@@ -1,5 +1,7 @@
 import type { Language } from '@avs/shared';
 import { StatusIndicator } from '../StatusIndicator/StatusIndicator.js';
+import { logout } from '../../api/client.js';
+import { createInitialProjectSessionState } from '../../state/project-session.js';
 import { useProjectSessionActions, useProjectSessionState } from '../../state/ProjectSessionContext.js';
 import styles from './Header.module.css';
 
@@ -10,6 +12,12 @@ export function Header() {
 
   function setUiLanguage(uiLanguage: Language) {
     setState({ language: { ...state.language, uiLanguage } });
+  }
+
+  /** RELEASE 02 — resets the entire client-side session, not just `currentUser`: a signed-out screen must never keep the previous user's project/analysis/prompt state around in memory. */
+  async function handleSignOut() {
+    await logout().catch(() => undefined);
+    setState({ ...createInitialProjectSessionState(), authStatus: 'signedOut', language: state.language });
   }
 
   return (
@@ -39,6 +47,14 @@ export function Header() {
           </button>
         </div>
         <StatusIndicator status={state.status} />
+        {state.currentUser ? (
+          <div className={styles.account}>
+            <span className={styles.email}>{state.currentUser.email}</span>
+            <button type="button" className={styles.signOut} onClick={() => void handleSignOut()}>
+              Sign out
+            </button>
+          </div>
+        ) : null}
       </div>
     </header>
   );

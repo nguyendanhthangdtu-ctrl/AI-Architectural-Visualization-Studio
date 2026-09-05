@@ -144,7 +144,7 @@ describe('EditPanel — BUILD 14 Advanced Editor', () => {
       fireEvent.click(screen.getByRole('button', { name: /apply edit/i }));
 
       await waitFor(() => expect(store.getState().latestOutputAssetId).toBe('out-2'));
-      expect(store.getState().latestGenerationOutputUrls).toEqual(['http://localhost:8080/assets/out-2']);
+      expect(store.getState().latestGenerationOutputUrls).toEqual(['/assets/out-2']);
       expect((screen.getByLabelText('Target region') as HTMLInputElement).value).toBe('');
     });
 

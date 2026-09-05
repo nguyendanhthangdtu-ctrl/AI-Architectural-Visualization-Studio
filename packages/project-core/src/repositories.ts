@@ -1,10 +1,11 @@
-import type { AssetId, ProjectId } from '@avs/shared';
+import type { AssetId, ProjectId, UserId } from '@avs/shared';
 import type { Project } from './project.js';
 import type { GenerationVersion } from './version.js';
 import type { LockId } from './lock.js';
 import type { EditCategory } from './edit-vocabulary.js';
 import type { CameraDNA, LightingDNA, MaterialDNA } from './dna.js';
 import type { VideoLockId, VideoMotionType } from './video-vocabulary.js';
+import type { Session, User } from './user.js';
 
 /**
  * Storage-agnostic repository interfaces — docs/03_TECHNICAL_ARCHITECTURE.md
@@ -241,4 +242,18 @@ export interface AuditEvent {
 export interface AuditLogRepository {
   record(event: AuditEvent): Promise<AuditEvent>;
   listByProject(projectId: ProjectId): Promise<AuditEvent[]>;
+}
+
+/** RELEASE 02 — real accounts. `email` lookups are case-insensitive (enforced by the implementation, not this interface). */
+export interface UserRepository {
+  create(user: User): Promise<User>;
+  getById(id: UserId): Promise<User | null>;
+  getByEmail(email: string): Promise<User | null>;
+}
+
+/** RELEASE 02 — real, revocable server-side sessions (see `Session`'s own doc comment, user.ts). */
+export interface SessionRepository {
+  create(session: Session): Promise<Session>;
+  getById(id: string): Promise<Session | null>;
+  deleteById(id: string): Promise<void>;
 }

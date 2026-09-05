@@ -179,7 +179,7 @@ describe('MultiViewPanel — BUILD 15 Multi-View / Sync / Creative View', () => 
 
       await waitFor(() => expect(store.getState().latestGenerationId).toBe('gen-2'));
       expect(store.getState().latestOutputAssetId).toBe('out-2');
-      expect(store.getState().latestGenerationOutputUrls).toEqual(['http://localhost:8080/assets/out-2']);
+      expect(store.getState().latestGenerationOutputUrls).toEqual(['/assets/out-2']);
     });
 
     it('shows the real error envelope, not a fake result, when the view request fails', async () => {

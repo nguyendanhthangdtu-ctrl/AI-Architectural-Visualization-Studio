@@ -4,6 +4,7 @@ import type { ImageGenerationAdapter } from '@avs/model-adapters';
 import { ImageGenerationService } from '@avs/model-adapters';
 import { createApp } from './server.js';
 import { createAppContext, type AppContext } from './app-context.js';
+import { registerTestUser, TEST_REGISTRATION_SECRET, withCookie, type TestSession } from './test-helpers/auth.js';
 
 const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -52,33 +53,34 @@ describe('apps/api view route (BUILD 15 Multi-View / Sync / Creative View)', () 
     baseUrl = `http://127.0.0.1:${port}`;
   }
 
-  async function createProjectAndAsset() {
-    const createRes = await fetch(`${baseUrl}/projects`, {
+  async function createProjectAndAsset(session: TestSession) {
+    const createRes = await fetch(`${baseUrl}/projects`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'Villa A', module: 'architecture' }),
-    });
+    }, session.cookie));
     const project = (await createRes.json()) as { id: string; currentVersionId: string };
-    const uploadRes = await fetch(`${baseUrl}/projects/${project.id}/assets`, {
+    const uploadRes = await fetch(`${baseUrl}/projects/${project.id}/assets`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'image/png' },
       body: ONE_PIXEL_PNG,
-    });
+    }, session.cookie));
     const asset = (await uploadRes.json()) as { id: string };
     return { project, asset };
   }
 
   it('runs a Sync View, persists a real ViewRecord, links GenerationRecord.viewId, and creates a kind:"view" version', async () => {
-    const context = createAppContext();
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     context.imageGenerationService = new ImageGenerationService({ 'nano-banana': fakeSucceedingAdapter('nano-banana') });
     await start(context);
+    const session = await registerTestUser(baseUrl);
 
-    const { project, asset } = await createProjectAndAsset();
-    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, {
+    const { project, asset } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id }),
-    });
+    }, session.cookie));
 
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -102,17 +104,18 @@ describe('apps/api view route (BUILD 15 Multi-View / Sync / Creative View)', () 
     const storedView = await context.viewRepository.getById(body.viewId);
     expect(storedView).toMatchObject({ mode: 'sync', resultingGenerationId: body.generationId });
 
-    const outputRes = await fetch(`${baseUrl}${body.outputAssetUrls[0]}`);
+    const outputRes = await fetch(`${baseUrl}${body.outputAssetUrls[0]}`, withCookie({}, session.cookie));
     expect(Buffer.from(await outputRes.arrayBuffer()).toString('base64')).toBe('ZmFrZS12aWV3LWltYWdl');
   });
 
   it('runs a Creative View with material/lighting/style proposals recorded verbatim', async () => {
-    const context = createAppContext();
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     context.imageGenerationService = new ImageGenerationService({ 'nano-banana': fakeSucceedingAdapter('nano-banana') });
     await start(context);
-    const { project, asset } = await createProjectAndAsset();
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
 
-    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, {
+    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -123,7 +126,7 @@ describe('apps/api view route (BUILD 15 Multi-View / Sync / Creative View)', () 
         lightingProposal: { timeOfDay: 'sunset' },
         styleProposal: 'Industrial',
       }),
-    });
+    }, session.cookie));
 
     const body = (await res.json()) as {
       view: { mode: string; materialProposal: unknown; lightingProposal: unknown; styleProposal: string };
@@ -135,67 +138,72 @@ describe('apps/api view route (BUILD 15 Multi-View / Sync / Creative View)', () 
   });
 
   it('records ignoredProposals for real provenance when a Sync View had a proposal structurally ignored client-side', async () => {
-    const context = createAppContext();
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     context.imageGenerationService = new ImageGenerationService({ 'nano-banana': fakeSucceedingAdapter('nano-banana') });
     await start(context);
-    const { project, asset } = await createProjectAndAsset();
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
 
-    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, {
+    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id, ignoredProposals: ['material', 'style'] }),
-    });
+    }, session.cookie));
     const body = (await res.json()) as { view: { ignoredProposals: string[] } };
     expect(body.view.ignoredProposals).toEqual(['material', 'style']);
   });
 
   it('returns 404 for an unknown project', async () => {
-    await start(createAppContext());
-    const res = await fetch(`${baseUrl}/projects/does-not-exist/views`, {
+    await start(createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET }));
+    const session = await registerTestUser(baseUrl);
+    const res = await fetch(`${baseUrl}/projects/does-not-exist/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, sourceAssetId: 'a1' }),
-    });
+    }, session.cookie));
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
   });
 
   it('returns 404 when the source asset does not belong to the project', async () => {
-    const context = createAppContext();
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     context.imageGenerationService = new ImageGenerationService({ 'nano-banana': fakeSucceedingAdapter('nano-banana') });
     await start(context);
-    const { project } = await createProjectAndAsset();
-    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, {
+    const session = await registerTestUser(baseUrl);
+    const { project } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, sourceAssetId: 'does-not-exist' }),
-    });
+    }, session.cookie));
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toMatchObject({ code: 'ASSET_NOT_FOUND' });
   });
 
   it('rejects an invalid mode rather than passing it through', async () => {
-    const context = createAppContext();
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     await start(context);
-    const { project, asset } = await createProjectAndAsset();
-    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, {
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, mode: 'freeform', sourceAssetId: asset.id }),
-    });
+    }, session.cookie));
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('returns 503 PROVIDER_NOT_CONFIGURED when no key is set — the real, honest state right now', async () => {
-    const context = createAppContext(); // no provider keys
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET }); // no provider keys
     await start(context);
-    const { project, asset } = await createProjectAndAsset();
-    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, {
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/views`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id }),
-    });
+    }, session.cookie));
     expect(res.status).toBe(503);
     await expect(res.json()).resolves.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
   });

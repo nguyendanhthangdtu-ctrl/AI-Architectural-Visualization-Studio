@@ -61,6 +61,27 @@ const serverEnvSchema = z.object({
   // API returns is signed and `GET /assets/:id` enforces the signature +
   // expiry for real.
   ASSET_URL_SIGNING_SECRET: z.string().optional(),
+
+  // RELEASE 02 (Security & Production Access Hardening) — real accounts.
+  // Unset: `POST /auth/register` is entirely disabled (deny-by-default for a
+  // private deployment — never open public self-registration). Set: its
+  // exact value must be supplied as `registrationSecret` in the request body
+  // to create an account. Share it privately with intended users; it is not
+  // a per-user password.
+  REGISTRATION_SECRET: z.string().optional(),
+
+  // RELEASE 02 — real-boolean parsing (zod's z.coerce.boolean() would treat
+  // the literal string "false" as truthy, a well-known JS/zod footgun this
+  // deliberately avoids). Governs both the session cookie's `Secure`
+  // attribute and whether `Strict-Transport-Security` is sent. Defaults to
+  // `false` so local dev over plain HTTP keeps working with zero
+  // configuration (docs/03 §11 "CLIENT → HTTPS/TLS REVERSE PROXY → API" —
+  // set this to `true` only once that reverse proxy is real).
+  TRUST_HTTPS: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -77,6 +98,7 @@ export const SECRET_ENV_KEYS: readonly (keyof ServerEnv)[] = [
   'ASSET_STORE_ACCESS_KEY',
   'ASSET_STORE_SECRET_KEY',
   'ASSET_URL_SIGNING_SECRET',
+  'REGISTRATION_SECRET',
 ];
 
 /**

@@ -130,7 +130,7 @@ describe('VideoPanel — BUILD 16 Image → Video', () => {
       await vi.advanceTimersByTimeAsync(3000);
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
       await vi.waitFor(() => expect(document.querySelector('video')).not.toBeNull());
-      expect(document.querySelector('video')?.getAttribute('src')).toBe('http://localhost:8080/assets/asset-9');
+      expect(document.querySelector('video')?.getAttribute('src')).toBe('/assets/asset-9');
     });
 
     it('shows a failed state when the provider operation errors', async () => {

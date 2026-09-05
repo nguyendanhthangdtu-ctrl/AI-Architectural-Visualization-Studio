@@ -5,6 +5,7 @@ import type { ImageGenerationAdapter } from '@avs/model-adapters';
 import { ImageGenerationService } from '@avs/model-adapters';
 import { createApp } from './server.js';
 import { createAppContext, type AppContext } from './app-context.js';
+import { registerTestUser, TEST_REGISTRATION_SECRET, withCookie, type TestSession } from './test-helpers/auth.js';
 
 const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -114,28 +115,28 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     baseUrl = `http://127.0.0.1:${port}`;
   }
 
-  async function createProjectAssetAnalysisAndGeneration() {
-    const createRes = await fetch(`${baseUrl}/projects`, {
+  async function createProjectAssetAnalysisAndGeneration(session: TestSession) {
+    const createRes = await fetch(`${baseUrl}/projects`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'Villa A', module: 'architecture' }),
-    });
+    }, session.cookie));
     const project = (await createRes.json()) as { id: string };
-    const uploadRes = await fetch(`${baseUrl}/projects/${project.id}/assets`, {
+    const uploadRes = await fetch(`${baseUrl}/projects/${project.id}/assets`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'image/png' },
       body: ONE_PIXEL_PNG,
-    });
+    }, session.cookie));
     const asset = (await uploadRes.json()) as { id: string };
 
-    const analysisRes = await fetch(`${baseUrl}/projects/${project.id}/analysis`, {
+    const analysisRes = await fetch(`${baseUrl}/projects/${project.id}/analysis`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ assetId: asset.id }),
-    });
+    }, session.cookie));
     const analysis = (await analysisRes.json()) as { analysisId: string };
 
-    const genRes = await fetch(`${baseUrl}/projects/${project.id}/generations`, {
+    const genRes = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -148,13 +149,13 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
         promptVersion: 'v1',
         scenarioVersion: 'v1',
       }),
-    });
+    }, session.cookie));
     const gen = (await genRes.json()) as { generationId: string; outputAssetUrls: string[] };
     return { project, asset, analysisId: analysis.analysisId, generationId: gen.generationId };
   }
 
   function contextWithFakes(qcResult: unknown = PERFECT_QC_RESULT) {
-    const context = createAppContext();
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     context.visionAnalysisEngine = {
       analyze: vi.fn().mockResolvedValue(FAKE_STRUCTURED_INTELLIGENCE),
     } as unknown as VisionAnalysisEngine;
@@ -167,13 +168,14 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('evaluates the generation and returns the QC result', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, analysisId, generationId } = await createProjectAssetAnalysisAndGeneration();
+      const session = await registerTestUser(baseUrl);
+      const { project, analysisId, generationId } = await createProjectAssetAnalysisAndGeneration(session);
 
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/qc`, {
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/qc`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ analysisId, locks: FIVE_LOCKS, instructions: [] }),
-      });
+      }, session.cookie));
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { generationId: string; qc: typeof PERFECT_QC_RESULT };
@@ -190,11 +192,12 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
 
     it('returns 404 for an unknown project', async () => {
       await start(contextWithFakes());
-      const res = await fetch(`${baseUrl}/projects/does-not-exist/generations/g1/qc`, {
+      const session = await registerTestUser(baseUrl);
+      const res = await fetch(`${baseUrl}/projects/does-not-exist/generations/g1/qc`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ analysisId: 'a1', locks: FIVE_LOCKS }),
-      });
+      }, session.cookie));
       expect(res.status).toBe(404);
       await expect(res.json()).resolves.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
     });
@@ -202,12 +205,13 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('returns 404 for an unknown generation', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, analysisId } = await createProjectAssetAnalysisAndGeneration();
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/does-not-exist/qc`, {
+      const session = await registerTestUser(baseUrl);
+      const { project, analysisId } = await createProjectAssetAnalysisAndGeneration(session);
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/does-not-exist/qc`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ analysisId, locks: FIVE_LOCKS }),
-      });
+      }, session.cookie));
       expect(res.status).toBe(404);
       await expect(res.json()).resolves.toMatchObject({ code: 'GENERATION_NOT_FOUND' });
     });
@@ -215,12 +219,13 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('returns 404 for an unknown analysis id', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, generationId } = await createProjectAssetAnalysisAndGeneration();
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/qc`, {
+      const session = await registerTestUser(baseUrl);
+      const { project, generationId } = await createProjectAssetAnalysisAndGeneration(session);
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/qc`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ analysisId: 'does-not-exist', locks: FIVE_LOCKS }),
-      });
+      }, session.cookie));
       expect(res.status).toBe(404);
       await expect(res.json()).resolves.toMatchObject({ code: 'ANALYSIS_NOT_FOUND' });
     });
@@ -228,12 +233,13 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('rejects a locks array that is not exactly the 5 known locks', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, analysisId, generationId } = await createProjectAssetAnalysisAndGeneration();
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/qc`, {
+      const session = await registerTestUser(baseUrl);
+      const { project, analysisId, generationId } = await createProjectAssetAnalysisAndGeneration(session);
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/qc`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ analysisId, locks: FIVE_LOCKS.slice(0, 2) }),
-      });
+      }, session.cookie));
       expect(res.status).toBe(400);
       await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
     });
@@ -243,12 +249,13 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('resubmits generation, records correction provenance, and chains a new version', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, asset, generationId } = await createProjectAssetAnalysisAndGeneration();
+      const session = await registerTestUser(baseUrl);
+      const { project, asset, generationId } = await createProjectAssetAnalysisAndGeneration(session);
 
       const projectBefore = await context.projectRepository.getById(project.id as never);
       const versionBefore = projectBefore!.currentVersionId;
 
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/regenerate`, {
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/regenerate`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -262,7 +269,7 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
           scenarioVersion: 'v1',
           correctionInstruction: 'Preserve the original roofline exactly.',
         }),
-      });
+      }, session.cookie));
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as {
@@ -283,8 +290,9 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('returns 404 for an unknown parent generation', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, asset } = await createProjectAssetAnalysisAndGeneration();
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/does-not-exist/regenerate`, {
+      const session = await registerTestUser(baseUrl);
+      const { project, asset } = await createProjectAssetAnalysisAndGeneration(session);
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/does-not-exist/regenerate`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -298,7 +306,7 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
           scenarioVersion: 'v1',
           correctionInstruction: 'fix it',
         }),
-      });
+      }, session.cookie));
       expect(res.status).toBe(404);
       await expect(res.json()).resolves.toMatchObject({ code: 'GENERATION_NOT_FOUND' });
     });
@@ -306,8 +314,9 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
     it('rejects a regenerate request with an empty correctionInstruction', async () => {
       const context = contextWithFakes();
       await start(context);
-      const { project, asset, generationId } = await createProjectAssetAnalysisAndGeneration();
-      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/regenerate`, {
+      const session = await registerTestUser(baseUrl);
+      const { project, asset, generationId } = await createProjectAssetAnalysisAndGeneration(session);
+      const res = await fetch(`${baseUrl}/projects/${project.id}/generations/${generationId}/regenerate`, withCookie({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -321,7 +330,7 @@ describe('apps/api generation QC + regenerate routes (BUILD 17 AI QC / Auto-Rege
           scenarioVersion: 'v1',
           correctionInstruction: '',
         }),
-      });
+      }, session.cookie));
       expect(res.status).toBe(400);
       await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
     });

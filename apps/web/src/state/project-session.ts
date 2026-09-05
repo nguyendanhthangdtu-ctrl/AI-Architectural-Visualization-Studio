@@ -10,6 +10,7 @@ import type {
   StructuredIntelligence,
 } from '@avs/ai-core';
 import type { CanonicalMasterPrompt, PromptOutput } from '@avs/prompt-engine';
+import type { AuthenticatedUser } from '../api/client.js';
 
 /**
  * Client-side ProjectSession state — docs/03_TECHNICAL_ARCHITECTURE.md §7
@@ -41,7 +42,13 @@ export interface ReferenceExtraction {
   extractedVisualLanguage: ExtractedVisualLanguage;
 }
 
+/** RELEASE 02 (Security & Production Access Hardening) — 'checking' while the initial `GET /auth/me` is in flight, so the app never briefly flashes the sign-in gate for an already-signed-in user on reload. */
+export type AuthStatus = 'checking' | 'signedOut' | 'signedIn';
+
 export interface ProjectSessionState {
+  /** RELEASE 02 — the real, server-confirmed signed-in user (never a client-invented identity); `null` until `authStatus` is `'signedIn'`. */
+  currentUser: AuthenticatedUser | null;
+  authStatus: AuthStatus;
   /**
    * Three independent language settings (Architecture Amendment) — UI
    * language is client-only; AI analysis / prompt output languages are
@@ -92,6 +99,8 @@ export interface ProjectSessionState {
 
 export function createInitialProjectSessionState(): ProjectSessionState {
   return {
+    currentUser: null,
+    authStatus: 'checking',
     language: DEFAULT_LANGUAGE_CONFIG,
     currentProject: null,
     projectDNA: null,

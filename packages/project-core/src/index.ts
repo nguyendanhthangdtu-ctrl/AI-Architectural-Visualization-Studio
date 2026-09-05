@@ -8,3 +8,4 @@ export * from './dna.js';
 export * from './architecture-module.js';
 export * from './interior-module.js';
 export * from './user-visual-preference-dna.js';
+export * from './user.js';

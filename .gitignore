@@ -7,3 +7,19 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# RELEASE 02 (Security & Production Access Hardening) — the documented
+# default DATABASE_URL/ASSET_STORE_URL paths (BUILD 18) land here: a real
+# SQLite DB (structured intelligence, prompts, user accounts) and real
+# uploaded/generated images. None of this belongs in source control, at any
+# nesting depth — a project subdirectory choosing the same default path
+# would previously have been committed by accident (docs/16, RELEASE 01
+# finding).
+/data/
+**/data/
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+tmp/
+.tmp/

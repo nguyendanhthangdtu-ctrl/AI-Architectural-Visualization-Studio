@@ -25,8 +25,19 @@ describe('parseServerEnv', () => {
         'CHATGPT_IMAGE_API_KEY',
         'DATABASE_URL',
         'ASSET_URL_SIGNING_SECRET',
+        'REGISTRATION_SECRET',
       ]),
     );
+  });
+
+  it('defaults TRUST_HTTPS to false, and parses "true"/"false" as real booleans (not JS truthiness)', () => {
+    expect(parseServerEnv({}).TRUST_HTTPS).toBe(false);
+    expect(parseServerEnv({ TRUST_HTTPS: 'true' }).TRUST_HTTPS).toBe(true);
+    expect(parseServerEnv({ TRUST_HTTPS: 'false' }).TRUST_HTTPS).toBe(false);
+  });
+
+  it('rejects a non-"true"/"false" TRUST_HTTPS value rather than silently coercing it', () => {
+    expect(() => parseServerEnv({ TRUST_HTTPS: 'yes' })).toThrow();
   });
 });
 

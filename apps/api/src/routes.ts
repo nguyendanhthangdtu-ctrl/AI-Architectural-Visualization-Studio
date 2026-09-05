@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import type { AssetId, ProjectId, Timestamp, UserId } from '@avs/shared';
+import type { AssetId, ProjectId, Timestamp } from '@avs/shared';
 import { DomainError } from '@avs/shared';
 import type { StructuredIntelligence } from '@avs/ai-core';
 import { deriveProjectDNA } from '@avs/ai-core';
@@ -40,13 +40,25 @@ import {
 import { readBody } from './read-body.js';
 import { validateUpload, MAX_UPLOAD_SIZE_BYTES } from './upload-validation.js';
 import { buildAssetUrl } from './signed-asset-url.js';
+import { sendJson } from './http-utils.js';
+import type { AuthenticatedUser } from '@avs/project-core';
 
 const MAX_JSON_BODY_BYTES = 10 * 1024; // project create/update payloads are small, fixed-shape JSON
 const MAX_GENERATION_BODY_BYTES = 50 * 1024; // a compiled master prompt + reference id list is larger than other JSON bodies here
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body));
+/**
+ * RELEASE 02 — the one real authorization check every project-scoped route
+ * calls through: `ownerId` always comes from the session-derived `user`
+ * (never a client-supplied id), and a project that exists but belongs to
+ * someone else returns the exact same `PROJECT_NOT_FOUND` as one that
+ * doesn't exist at all — never leaks existence to a non-owner (IDOR-safe).
+ */
+async function resolveOwnedProjectOrThrow(context: AppContext, projectId: string, user: AuthenticatedUser): Promise<Project> {
+  const project = await context.projectRepository.getById(projectId as ProjectId);
+  if (!project || project.ownerId !== user.id) {
+    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
+  }
+  return project;
 }
 
 /** docs/01 MVP step 1 "Create project" + step 3 "Select Architecture or Interior". */
@@ -54,6 +66,7 @@ export async function handleCreateProject(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
 ): Promise<void> {
   const raw = await readBody(req, MAX_JSON_BODY_BYTES);
   let parsedJson: unknown;
@@ -75,6 +88,7 @@ export async function handleCreateProject(
   const now = new Date().toISOString() as Timestamp;
   const project: Project = {
     id: randomUUID() as ProjectId,
+    ownerId: user.id,
     name: result.data.name,
     module: result.data.module,
     createdAt: now,
@@ -88,11 +102,13 @@ export async function handleCreateProject(
   sendJson(res, 201, created);
 }
 
-export async function handleGetProject(res: ServerResponse, context: AppContext, projectId: string): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+export async function handleGetProject(
+  res: ServerResponse,
+  context: AppContext,
+  user: AuthenticatedUser,
+  projectId: string,
+): Promise<void> {
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
   sendJson(res, 200, project);
 }
 
@@ -101,12 +117,10 @@ export async function handleUploadAsset(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const contentType = req.headers['content-type'];
   const data = await readBody(req, MAX_UPLOAD_SIZE_BYTES);
@@ -130,12 +144,10 @@ export async function handleRunAnalysis(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const raw = await readBody(req, MAX_JSON_BODY_BYTES);
   let parsedJson: unknown;
@@ -185,8 +197,7 @@ export async function handleRunAnalysis(
     kind: 'analysis',
     snapshotRef: analysisRecord.id,
     createdAt: now as Timestamp,
-    // No auth exists yet (BUILD 02 deferral) — no real user identity to attribute this to.
-    createdBy: 'system' as UserId,
+    createdBy: user.id,
   };
   await context.versionRepository.create(version);
 
@@ -215,12 +226,10 @@ export async function handleExtractReference(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const raw = await readBody(req, MAX_JSON_BODY_BYTES);
   let parsedJson: unknown;
@@ -393,12 +402,10 @@ export async function handleRunGeneration(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const raw = await readBody(req, MAX_GENERATION_BODY_BYTES);
   let parsedJson: unknown;
@@ -456,7 +463,7 @@ export async function handleRunGeneration(
     kind: 'generation',
     snapshotRef: generationRecord.id,
     createdAt: now as Timestamp,
-    createdBy: 'system' as UserId, // no auth yet (BUILD 02 deferral)
+    createdBy: user.id,
   };
   await context.versionRepository.create(version);
 
@@ -489,13 +496,11 @@ export async function handleRunQc(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
   generationId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const generation = await context.generationRepository.getById(generationId);
   if (!generation || generation.projectId !== project.id) {
@@ -584,13 +589,11 @@ export async function handleRegenerate(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
   generationId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const failedGeneration = await context.generationRepository.getById(generationId);
   if (!failedGeneration || failedGeneration.projectId !== project.id) {
@@ -662,7 +665,7 @@ export async function handleRegenerate(
     kind: 'generation',
     snapshotRef: generationRecord.id,
     createdAt: now as Timestamp,
-    createdBy: 'system' as UserId, // no auth yet (BUILD 02 deferral)
+    createdBy: user.id,
   };
   await context.versionRepository.create(version);
 
@@ -675,7 +678,7 @@ export async function handleRegenerate(
   await context.auditLogRepository.record({
     id: randomUUID(),
     action: 'generation.regenerate',
-    actorId: 'anonymous', // no auth yet (BUILD 02 deferral)
+    actorId: user.id,
     projectId: project.id,
     targetId: generationRecord.id,
     metadata: { regeneratedFromGenerationId: failedGeneration.id, correctionInstruction: result.data.correctionInstruction },
@@ -708,12 +711,10 @@ export async function handleRunView(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const raw = await readBody(req, MAX_GENERATION_BODY_BYTES);
   let parsedJson: unknown;
@@ -787,7 +788,7 @@ export async function handleRunView(
     kind: 'view',
     snapshotRef: generationRecord.id,
     createdAt: now as Timestamp,
-    createdBy: 'system' as UserId, // no auth yet (BUILD 02 deferral)
+    createdBy: user.id,
   };
   await context.versionRepository.create(version);
 
@@ -833,13 +834,11 @@ export async function handleRunEdit(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
   generationId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const parentGeneration = await context.generationRepository.getById(generationId);
   if (!parentGeneration || parentGeneration.projectId !== project.id) {
@@ -952,7 +951,7 @@ export async function handleRunEdit(
     kind: 'edit',
     snapshotRef: editRecord.id,
     createdAt: now as Timestamp,
-    createdBy: 'system' as UserId, // no auth yet (BUILD 02 deferral)
+    createdBy: user.id,
   };
   await context.versionRepository.create(version);
 
@@ -994,13 +993,11 @@ export async function handleRunVideo(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
   generationId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const parentGeneration = await context.generationRepository.getById(generationId);
   if (!parentGeneration || parentGeneration.projectId !== project.id) {
@@ -1078,7 +1075,7 @@ export async function handleRunVideo(
     kind: 'video',
     snapshotRef: videoRecord.id,
     createdAt: now as Timestamp,
-    createdBy: 'system' as UserId, // no auth yet (BUILD 02 deferral)
+    createdBy: user.id,
   };
   await context.versionRepository.create(version);
 
@@ -1106,13 +1103,11 @@ export async function handleRunVideo(
 export async function handleGetVideoStatus(
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
   videoId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const video = await context.videoRepository.getById(videoId);
   if (!video || video.projectId !== project.id) {
@@ -1180,10 +1175,19 @@ export async function handleGetAsset(
   req: IncomingMessage,
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   assetId: string,
 ): Promise<void> {
   const found = await context.assetStore.get(assetId as AssetId);
   if (!found) {
+    throw new DomainError({ code: 'ASSET_NOT_FOUND', message: `No asset with id ${assetId}`, retryable: false });
+  }
+
+  // RELEASE 02 — real ownership check, not just a signature: an asset has
+  // no `:projectId` in its own URL, so ownership is resolved via the asset's
+  // own recorded `projectId` — never a client-supplied id (docs/16 IDOR).
+  const owningProject = await context.projectRepository.getById(found.ref.projectId);
+  if (!owningProject || owningProject.ownerId !== user.id) {
     throw new DomainError({ code: 'ASSET_NOT_FOUND', message: `No asset with id ${assetId}`, retryable: false });
   }
 
@@ -1203,7 +1207,7 @@ export async function handleGetAsset(
   await context.auditLogRepository.record({
     id: randomUUID(),
     action: 'asset.access',
-    actorId: 'anonymous', // no auth yet (BUILD 02 deferral)
+    actorId: user.id,
     projectId: found.ref.projectId,
     targetId: assetId,
     metadata: {},
@@ -1225,13 +1229,11 @@ export async function handleGetAsset(
 export async function handleDeleteAsset(
   res: ServerResponse,
   context: AppContext,
+  user: AuthenticatedUser,
   projectId: string,
   assetId: string,
 ): Promise<void> {
-  const project = await context.projectRepository.getById(projectId as ProjectId);
-  if (!project) {
-    throw new DomainError({ code: 'PROJECT_NOT_FOUND', message: `No project with id ${projectId}`, retryable: false });
-  }
+  const project = await resolveOwnedProjectOrThrow(context, projectId, user);
 
   const found = await context.assetStore.get(assetId as AssetId);
   if (!found || found.ref.projectId !== project.id) {
@@ -1243,7 +1245,7 @@ export async function handleDeleteAsset(
   await context.auditLogRepository.record({
     id: randomUUID(),
     action: 'asset.delete',
-    actorId: 'anonymous', // no auth yet (BUILD 02 deferral)
+    actorId: user.id,
     projectId: project.id,
     targetId: assetId,
     metadata: {},

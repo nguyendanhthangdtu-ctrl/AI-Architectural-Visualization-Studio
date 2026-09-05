@@ -66,3 +66,30 @@
   background: var(--avs-accent, var(--avs-text-secondary));
   color: var(--avs-bg-panel);
 }
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: var(--avs-space-2);
+}
+
+.email {
+  color: var(--avs-text-muted);
+  font-size: 11px;
+}
+
+.signOut {
+  appearance: none;
+  border: 1px solid var(--avs-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--avs-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.signOut:hover {
+  background: var(--avs-bg-hover, rgba(255, 255, 255, 0.06));
+}

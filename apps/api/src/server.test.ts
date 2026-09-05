@@ -1,6 +1,8 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './server.js';
+import { createAppContext } from './app-context.js';
+import { registerTestUser, TEST_REGISTRATION_SECRET, withCookie } from './test-helpers/auth.js';
 
 describe('apps/api bootstrap server', () => {
   let server: ReturnType<typeof createApp> | undefined;
@@ -18,11 +20,33 @@ describe('apps/api bootstrap server', () => {
     await expect(res.json()).resolves.toEqual({ status: 'ok' });
   });
 
-  it('returns a normalized error envelope for an unknown route, with no stack trace leaked', async () => {
+  /**
+   * RELEASE 02 — `requireAuth()` runs before route matching for every
+   * non-public path, so an unauthenticated request to a route that doesn't
+   * even exist gets 401, not 404 — deliberate: an anonymous caller should
+   * never be able to enumerate which routes exist by comparing 401 vs 404.
+   * A signed-in caller still gets a real 404 for an unknown route.
+   */
+  it('rejects an unauthenticated request to an unknown route with 401, not a route-existence-revealing 404', async () => {
     server = createApp();
     await new Promise<void>((resolve) => server!.listen(0, resolve));
     const { port } = server.address() as AddressInfo;
     const res = await fetch(`http://127.0.0.1:${port}/unknown`);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ code: 'UNAUTHENTICATED', retryable: false });
+    expect(Object.keys(body)).not.toContain('stack');
+  });
+
+  it('returns a normalized error envelope for an unknown route once authenticated, with no stack trace leaked', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    server = createApp(context);
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const session = await registerTestUser(baseUrl);
+
+    const res = await fetch(`${baseUrl}/unknown`, withCookie({}, session.cookie));
     expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ code: 'NOT_FOUND', retryable: false });

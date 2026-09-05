@@ -9,6 +9,8 @@ import type {
   GenerationRepository,
   ProjectRepository,
   ReferenceRepository,
+  SessionRepository,
+  UserRepository,
   VersionRepository,
   ViewRepository,
   VideoRepository,
@@ -22,6 +24,8 @@ import {
   SqliteGenerationRepository,
   SqliteProjectRepository,
   SqliteReferenceRepository,
+  SqliteSessionRepository,
+  SqliteUserRepository,
   SqliteVersionRepository,
   SqliteVideoRepository,
   SqliteViewRepository,
@@ -44,6 +48,9 @@ import { createAssetUrlSigner, type AssetUrlSigner } from './signed-asset-url.js
 
 /** docs/16 "Rate limit expensive AI endpoints" — applied to analysis/reference/generation/edit/view/video/QC/regenerate routes (server.ts). */
 export const AI_ROUTE_RATE_LIMIT = { maxRequests: 30, windowMs: 60_000 };
+
+/** RELEASE 02 — tighter limit on register/login specifically, to bound credential-guessing/account-creation abuse. */
+export const AUTH_ROUTE_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 };
 
 /**
  * Repository/engine instances the API routes depend on — docs/03 ADR-003.
@@ -71,6 +78,14 @@ export interface AppContext {
   auditLogRepository: AuditLogRepository;
   assetUrlSigner: AssetUrlSigner | null;
   rateLimiter: RateLimiter;
+  /** RELEASE 02 — real accounts/sessions. */
+  userRepository: UserRepository;
+  sessionRepository: SessionRepository;
+  /** Gates `POST /auth/register` — unset means registration is disabled (deny-by-default). */
+  registrationSecret: string | undefined;
+  /** Sets the session cookie's `Secure` attribute and gates `Strict-Transport-Security` — see env.ts's `TRUST_HTTPS`. */
+  cookieSecure: boolean;
+  authRateLimiter: RateLimiter;
 }
 
 /**
@@ -99,6 +114,8 @@ export function createAppContext(
     dbPath?: string | undefined;
     assetsDir?: string | undefined;
     assetUrlSigningSecret?: string | undefined;
+    registrationSecret?: string | undefined;
+    cookieSecure?: boolean | undefined;
   } = {},
 ): AppContext {
   const db = new SqliteDatabase(config.dbPath ?? ':memory:');
@@ -130,5 +147,10 @@ export function createAppContext(
     auditLogRepository: new SqliteAuditLogRepository(db),
     assetUrlSigner: createAssetUrlSigner(config.assetUrlSigningSecret),
     rateLimiter: createInMemoryRateLimiter(AI_ROUTE_RATE_LIMIT),
+    userRepository: new SqliteUserRepository(db),
+    sessionRepository: new SqliteSessionRepository(db),
+    registrationSecret: config.registrationSecret,
+    cookieSecure: config.cookieSecure ?? false,
+    authRateLimiter: createInMemoryRateLimiter(AUTH_ROUTE_RATE_LIMIT),
   };
 }

@@ -1,5 +1,5 @@
 import { DomainError } from '@avs/shared';
-import type { ProjectId } from '@avs/shared';
+import type { ProjectId, UserId } from '@avs/shared';
 import type {
   AnalysisRecord,
   AnalysisRepository,
@@ -14,6 +14,10 @@ import type {
   ProjectRepository,
   ReferenceRecord,
   ReferenceRepository,
+  Session,
+  SessionRepository,
+  User,
+  UserRepository,
   VersionRepository,
   VideoRecord,
   VideoRepository,
@@ -39,6 +43,7 @@ const EDITS_TABLE = 'edits';
 const VIEWS_TABLE = 'view_records';
 const VIDEOS_TABLE = 'videos';
 const AUDIT_EVENTS_TABLE = 'audit_events';
+const SESSIONS_TABLE = 'sessions';
 
 export class SqliteProjectRepository implements ProjectRepository {
   constructor(private readonly db: SqliteDatabase) {
@@ -218,6 +223,64 @@ export class SqliteAuditLogRepository implements AuditLogRepository {
 
   async listByProject(projectId: ProjectId): Promise<AuditEvent[]> {
     return this.db.listByProject<AuditEvent>(AUDIT_EVENTS_TABLE, projectId);
+  }
+}
+
+/**
+ * RELEASE 02 — real accounts. Users aren't project-scoped (no meaningful
+ * `project_id`), and need a real unique-by-email lookup the generic
+ * id/project_id/data table shape doesn't provide — so this owns a small,
+ * bespoke table (`users`) directly on `db.raw` rather than reusing
+ * `SqliteDatabase`'s generic JSON-blob helpers.
+ */
+export class SqliteUserRepository implements UserRepository {
+  constructor(private readonly db: SqliteDatabase) {
+    this.db.raw.exec(
+      `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, data TEXT NOT NULL)`,
+    );
+  }
+
+  async create(user: User): Promise<User> {
+    const existing = await this.getByEmail(user.email);
+    if (existing) {
+      throw new DomainError({ code: 'EMAIL_ALREADY_REGISTERED', message: 'An account with this email already exists.', retryable: false });
+    }
+    this.db.raw
+      .prepare(`INSERT INTO users (id, email, data) VALUES (?, ?, ?)`)
+      .run(user.id, user.email.toLowerCase(), JSON.stringify(user));
+    return user;
+  }
+
+  async getById(id: UserId): Promise<User | null> {
+    const row = this.db.raw.prepare(`SELECT data FROM users WHERE id = ?`).get(id) as { data: string } | undefined;
+    return row ? (JSON.parse(row.data) as User) : null;
+  }
+
+  async getByEmail(email: string): Promise<User | null> {
+    const row = this.db.raw.prepare(`SELECT data FROM users WHERE email = ?`).get(email.toLowerCase()) as
+      | { data: string }
+      | undefined;
+    return row ? (JSON.parse(row.data) as User) : null;
+  }
+}
+
+/** RELEASE 02 — real, revocable sessions; fits the generic id/project_id/data shape (`project_id` stays unused/null). */
+export class SqliteSessionRepository implements SessionRepository {
+  constructor(private readonly db: SqliteDatabase) {
+    db.ensureTable(SESSIONS_TABLE);
+  }
+
+  async create(session: Session): Promise<Session> {
+    this.db.insert(SESSIONS_TABLE, session.id, null, session);
+    return session;
+  }
+
+  async getById(id: string): Promise<Session | null> {
+    return this.db.getById<Session>(SESSIONS_TABLE, id);
+  }
+
+  async deleteById(id: string): Promise<void> {
+    this.db.deleteById(SESSIONS_TABLE, id);
   }
 }
 

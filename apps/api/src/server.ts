@@ -3,8 +3,11 @@ import { pathToFileURL } from 'node:url';
 import { createConsoleLogger, createInMemoryMetrics, DomainError, parseServerEnv } from '@avs/shared';
 import { sendError } from './error-handling.js';
 import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
+import { applySecurityHeaders } from './security-headers.js';
 import { enforceRateLimit } from './rate-limit-middleware.js';
 import { createAppContext, type AppContext } from './app-context.js';
+import { handleLogin, handleLogout, handleMe, handleRegister } from './auth/auth-routes.js';
+import { requireAuth } from './auth/session.js';
 import {
   handleCreateProject,
   handleDeleteAsset,
@@ -54,6 +57,7 @@ export function createApp(
 ) {
   return createServer((req, res) => {
     applyCorsHeaders(req, res, allowedOrigins);
+    applySecurityHeaders(res, { trustHttps: context.cookieSecure });
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -82,94 +86,122 @@ export function createApp(
           return;
         }
 
+        if (req.method === 'POST' && path === '/auth/register') {
+          enforceRateLimit(context.authRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          await handleRegister(req, res, context);
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/auth/login') {
+          enforceRateLimit(context.authRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          await handleLogin(req, res, context);
+          return;
+        }
+
+        // RELEASE 02 (docs/16 "explicitly allowlist public endpoints") — every
+        // route below this line requires a real, valid session; /health,
+        // /metrics, /auth/register, and /auth/login (the only public routes)
+        // already returned above and never reach this check.
+        const user = await requireAuth(context, req);
+
+        if (req.method === 'POST' && path === '/auth/logout') {
+          await handleLogout(req, res, context);
+          return;
+        }
+
+        if (req.method === 'GET' && path === '/auth/me') {
+          handleMe(res, user);
+          return;
+        }
+
         if (req.method === 'POST' && path === '/projects') {
-          await handleCreateProject(req, res, context);
+          await handleCreateProject(req, res, context, user);
           return;
         }
 
         const projectAssetsMatch = path.match(PROJECT_ASSETS_ROUTE);
         if (req.method === 'POST' && projectAssetsMatch) {
-          await handleUploadAsset(req, res, context, projectAssetsMatch[1]!);
+          await handleUploadAsset(req, res, context, user, projectAssetsMatch[1]!);
           return;
         }
 
         const projectAnalysisMatch = path.match(PROJECT_ANALYSIS_ROUTE);
         if (req.method === 'POST' && projectAnalysisMatch) {
-          enforceRateLimit(context, req);
-          await handleRunAnalysis(req, res, context, projectAnalysisMatch[1]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRunAnalysis(req, res, context, user, projectAnalysisMatch[1]!);
           return;
         }
 
         const projectReferencesMatch = path.match(PROJECT_REFERENCES_ROUTE);
         if (req.method === 'POST' && projectReferencesMatch) {
-          enforceRateLimit(context, req);
-          await handleExtractReference(req, res, context, projectReferencesMatch[1]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleExtractReference(req, res, context, user, projectReferencesMatch[1]!);
           return;
         }
 
         const projectGenerationEditsMatch = path.match(PROJECT_GENERATION_EDITS_ROUTE);
         if (req.method === 'POST' && projectGenerationEditsMatch) {
-          enforceRateLimit(context, req);
-          await handleRunEdit(req, res, context, projectGenerationEditsMatch[1]!, projectGenerationEditsMatch[2]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRunEdit(req, res, context, user, projectGenerationEditsMatch[1]!, projectGenerationEditsMatch[2]!);
           return;
         }
 
         const projectGenerationVideosMatch = path.match(PROJECT_GENERATION_VIDEOS_ROUTE);
         if (req.method === 'POST' && projectGenerationVideosMatch) {
-          enforceRateLimit(context, req);
-          await handleRunVideo(req, res, context, projectGenerationVideosMatch[1]!, projectGenerationVideosMatch[2]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRunVideo(req, res, context, user, projectGenerationVideosMatch[1]!, projectGenerationVideosMatch[2]!);
           return;
         }
 
         const projectVideoIdMatch = path.match(PROJECT_VIDEO_ID_ROUTE);
         if (req.method === 'GET' && projectVideoIdMatch) {
-          await handleGetVideoStatus(res, context, projectVideoIdMatch[1]!, projectVideoIdMatch[2]!);
+          await handleGetVideoStatus(res, context, user, projectVideoIdMatch[1]!, projectVideoIdMatch[2]!);
           return;
         }
 
         const projectGenerationQcMatch = path.match(PROJECT_GENERATION_QC_ROUTE);
         if (req.method === 'POST' && projectGenerationQcMatch) {
-          enforceRateLimit(context, req);
-          await handleRunQc(req, res, context, projectGenerationQcMatch[1]!, projectGenerationQcMatch[2]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRunQc(req, res, context, user, projectGenerationQcMatch[1]!, projectGenerationQcMatch[2]!);
           return;
         }
 
         const projectGenerationRegenerateMatch = path.match(PROJECT_GENERATION_REGENERATE_ROUTE);
         if (req.method === 'POST' && projectGenerationRegenerateMatch) {
-          enforceRateLimit(context, req);
-          await handleRegenerate(req, res, context, projectGenerationRegenerateMatch[1]!, projectGenerationRegenerateMatch[2]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRegenerate(req, res, context, user, projectGenerationRegenerateMatch[1]!, projectGenerationRegenerateMatch[2]!);
           return;
         }
 
         const projectGenerationsMatch = path.match(PROJECT_GENERATIONS_ROUTE);
         if (req.method === 'POST' && projectGenerationsMatch) {
-          enforceRateLimit(context, req);
-          await handleRunGeneration(req, res, context, projectGenerationsMatch[1]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRunGeneration(req, res, context, user, projectGenerationsMatch[1]!);
           return;
         }
 
         const projectViewsMatch = path.match(PROJECT_VIEWS_ROUTE);
         if (req.method === 'POST' && projectViewsMatch) {
-          enforceRateLimit(context, req);
-          await handleRunView(req, res, context, projectViewsMatch[1]!);
+          enforceRateLimit(context.rateLimiter, user.id);
+          await handleRunView(req, res, context, user, projectViewsMatch[1]!);
           return;
         }
 
         const projectAssetIdMatch = path.match(PROJECT_ASSET_ID_ROUTE);
         if (req.method === 'DELETE' && projectAssetIdMatch) {
-          await handleDeleteAsset(res, context, projectAssetIdMatch[1]!, projectAssetIdMatch[2]!);
+          await handleDeleteAsset(res, context, user, projectAssetIdMatch[1]!, projectAssetIdMatch[2]!);
           return;
         }
 
         const projectIdMatch = path.match(PROJECT_ID_ROUTE);
         if (req.method === 'GET' && projectIdMatch) {
-          await handleGetProject(res, context, projectIdMatch[1]!);
+          await handleGetProject(res, context, user, projectIdMatch[1]!);
           return;
         }
 
         const assetIdMatch = path.match(ASSET_ID_ROUTE);
         if (req.method === 'GET' && assetIdMatch) {
-          await handleGetAsset(req, res, context, assetIdMatch[1]!);
+          await handleGetAsset(req, res, context, user, assetIdMatch[1]!);
           return;
         }
 
@@ -198,6 +230,8 @@ if (isMainModule) {
       dbPath: env.DATABASE_URL,
       assetsDir: env.ASSET_STORE_URL,
       assetUrlSigningSecret: env.ASSET_URL_SIGNING_SECRET,
+      registrationSecret: env.REGISTRATION_SECRET,
+      cookieSecure: env.TRUST_HTTPS,
     }),
     logger,
     parseAllowedOrigins(env.ALLOWED_ORIGINS),

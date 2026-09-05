@@ -21,10 +21,23 @@ export function parseAllowedOrigins(raw: string | undefined): readonly string[] 
     .filter((origin) => origin.length > 0);
 }
 
+/**
+ * RELEASE 02: `Access-Control-Allow-Credentials: true` is required for the
+ * session cookie to ever be usable cross-origin at all (a browser drops the
+ * cookie from a cross-origin `fetch(..., { credentials: 'include' })`
+ * response without it) — only ever sent alongside a real, allowlisted,
+ * non-wildcard origin, never with `*` (the two are mutually exclusive by the
+ * Fetch spec itself: browsers reject `Allow-Credentials: true` paired with a
+ * wildcard origin). The primary supported architecture is same-origin (a dev
+ * proxy locally, a shared reverse-proxy domain in production — see
+ * apps/web/vite.config.ts and docs/03 §11), where this header isn't even
+ * consulted; it exists for the genuinely cross-origin case.
+ */
 export function applyCorsHeaders(req: IncomingMessage, res: ServerResponse, allowedOrigins: readonly string[]): void {
   const origin = req.headers.origin;
   if (typeof origin === 'string' && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
