@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './server.js';
 import { createAppContext, type AppContext } from './app-context.js';
-import { registerTestUser, withCookie } from './test-helpers/auth.js';
+import { registerTestUser, TEST_REGISTRATION_SECRET, withCookie } from './test-helpers/auth.js';
 
 /**
  * BUILD 19 Phase 4 (Live Provider Smoke Test) — exercises a real provider
@@ -47,6 +47,14 @@ describe.skipIf(!LIVE_SMOKE_TEST_ENABLED)('Live AI provider smoke test (BUILD 19
       nanoBananaApiKey: process.env['NANO_BANANA_API_KEY'],
       chatgptImageApiKey: process.env['CHATGPT_IMAGE_API_KEY'],
       veoApiKey: process.env['VEO_API_KEY'],
+      // A real bug found only by actually running this file with
+      // RUN_LIVE_PROVIDER_SMOKE_TEST=true and no AI key: without a real
+      // registrationSecret, POST /auth/register is deny-by-default disabled
+      // (RELEASE 02), so every test here — not just the AI-gated ones —
+      // failed at registerTestUser() with 403 REGISTRATION_DISABLED before
+      // ever reaching a provider. This is a test-only secret (never a real
+      // production value), same convention every other route test file uses.
+      registrationSecret: TEST_REGISTRATION_SECRET,
     });
     server = createApp(context);
     await new Promise<void>((resolve) => server!.listen(0, resolve));
