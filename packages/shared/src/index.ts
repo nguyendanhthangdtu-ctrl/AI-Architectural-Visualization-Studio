@@ -8,4 +8,5 @@ export * from './provider-error-category.js';
 export * from './rate-limiter.js';
 export * from './metrics.js';
 export * from './fetch-timeout.js';
+export * from './bounded-retry.js';
 export { z } from 'zod';

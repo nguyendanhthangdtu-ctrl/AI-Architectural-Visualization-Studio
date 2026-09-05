@@ -38,6 +38,7 @@ const HTTP_STATUS_BY_CODE: Readonly<Record<string, number>> = {
   GENERATION_IN_PROGRESS: 409, // BUILD 21 — a concurrent request with the same Idempotency-Key is still mid-flight
   GENERATION_OUTPUT_INVALID: 502, // BUILD 21 — provider returned something that isn't a real, decodable image; not the caller's fault
   EMAIL_PROVIDER_ERROR: 502, // BUILD 22 — apps/api acting as gateway to an upstream (Resend) that failed
+  ASSET_STORE_ERROR: 500, // BUILD 23 — our own storage failed to persist a real, already-validated generated image; not the caller's fault, not an upstream gateway
 };
 
 export function toErrorEnvelope(error: unknown): { httpStatus: number; envelope: ErrorEnvelope } {

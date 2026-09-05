@@ -55,12 +55,35 @@ describe('createNanoBananaAdapter', () => {
     expect(body.input[2]).toEqual({ type: 'image', data: Buffer.from([9, 9]).toString('base64'), mime_type: 'image/jpeg' });
   });
 
-  it('classifies a 429 rate-limit response as retryable', async () => {
+  it('classifies a 429 rate-limit response as retryable, and BUILD 23: bounded-retries it before giving up', async () => {
     const fetchFn = vi
       .fn()
       .mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'quota exceeded' });
-    const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch });
-    await expect(adapter.generate(request)).rejects.toMatchObject({ code: 'NANO_BANANA_PROVIDER_ERROR', retryable: true });
+    const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, retryBackoffMs: 1 });
+    await expect(adapter.generate(request)).rejects.toMatchObject({ code: 'NANO_BANANA_PROVIDER_ERROR', retryable: true, providerCode: 'PROVIDER_RATE_LIMITED' });
+    expect(fetchFn).toHaveBeenCalledTimes(2); // default maxAttempts=2 — bounded, not infinite
+  });
+
+  it('BUILD 23: retries a 5xx once, then succeeds', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable', text: async () => 'down' })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ output_image: { data: 'aW1n', mime_type: 'image/jpeg' } }) });
+    const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, retryBackoffMs: 1 });
+    const result = await adapter.generate(request);
+    expect(result.status).toBe('succeeded');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('BUILD 23: never retries a real client-side timeout — the provider may already be mid-generation', async () => {
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+      });
+    });
+    const adapter = createNanoBananaAdapter({ apiKey: 'k', fetchFn: fetchFn as unknown as typeof fetch, timeoutMs: 5, retryBackoffMs: 1 });
+    await expect(adapter.generate(request)).rejects.toMatchObject({ providerCode: 'PROVIDER_TIMEOUT' });
+    expect(fetchFn).toHaveBeenCalledTimes(1); // no retry on an ambiguous timeout — cost safety
   });
 
   it('classifies a 400 client error as not retryable', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
+import type { AssetId } from '@avs/shared';
 import type { ImageGenerationAdapter } from '@avs/model-adapters';
 import { ImageGenerationService } from '@avs/model-adapters';
 import { createApp } from './server.js';
@@ -235,6 +236,53 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
 
     expect(res.status).toBe(502);
     await expect(res.json()).resolves.toMatchObject({ code: 'GENERATION_OUTPUT_INVALID' });
+
+    // BUILD 23 — this was a real bug: the job used to stay stuck 'running'
+    // forever when output validation failed, permanently blocking any
+    // future retry of this exact idempotency key.
+    const job = await context.jobQueue.getStatus('job-1');
+    expect(job?.status).toBe('failed');
+  });
+
+  it('BUILD 23: marks the job failed (not stuck running) when AssetStore.put() itself fails, not just when the provider fails', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    context.imageGenerationService = new ImageGenerationService({ 'nano-banana': fakeSucceedingAdapter('nano-banana') });
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session); // real upload succeeds — put() only starts failing below
+
+    context.assetStore.put = async () => {
+      throw new Error('simulated disk failure');
+    };
+
+    const requestInit = withCookie(
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'asset-failure-retry-key' },
+        body: JSON.stringify({ ...VALID_BODY, sourceAssetId: asset.id, referenceAssetIds: [] }),
+      },
+      session.cookie,
+    );
+
+    const res = await fetch(`${baseUrl}/projects/${project.id}/generations`, requestInit);
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({ code: 'ASSET_STORE_ERROR' });
+
+    const job = await context.jobQueue.getStatus('job-1');
+    expect(job?.status).toBe('failed'); // not stuck 'running'
+
+    // And this exact same idempotency key can be retried afterward — not
+    // permanently blocked by a job that never recovered from 'running'.
+    context.assetStore.put = async (params) => ({
+      id: 'recovered-asset' as AssetId,
+      projectId: params.projectId,
+      url: '/assets/recovered-asset',
+      contentType: params.contentType,
+      sizeBytes: params.data.length,
+    });
+    const retryRes = await fetch(`${baseUrl}/projects/${project.id}/generations`, requestInit);
+    expect(retryRes.status).toBe(201);
   });
 
   it('returns 404 for an unknown project', async () => {

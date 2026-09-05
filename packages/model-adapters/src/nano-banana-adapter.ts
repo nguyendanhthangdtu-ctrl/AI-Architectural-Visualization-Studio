@@ -1,4 +1,12 @@
-import { classifyProviderHttpStatus, DomainError, fetchWithTimeout, ProviderTimeoutError, sanitizeProviderErrorBody } from '@avs/shared';
+import {
+  classifyProviderHttpStatus,
+  DEFAULT_PROVIDER_TIMEOUT_MS,
+  DomainError,
+  fetchWithTimeout,
+  ProviderTimeoutError,
+  sanitizeProviderErrorBody,
+  withBoundedRetry,
+} from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 import type {
   AdapterCapabilities,
@@ -32,6 +40,32 @@ export interface NanoBananaAdapterConfig {
   model?: string;
   /** Injectable for testing — defaults to the global fetch. */
   fetchFn?: typeof fetch;
+  /** BUILD 23 — real, bounded request timeout; defaults to the shared `DEFAULT_PROVIDER_TIMEOUT_MS` every other adapter already uses. */
+  timeoutMs?: number;
+  /**
+   * BUILD 23 (cost-safe bounded retry) — default 2 (deliberately smaller
+   * than the email adapter's default 3: each retry here is a real,
+   * billable generation attempt, not a nuisance-only email resend).
+   */
+  maxAttempts?: number;
+  /** Base backoff between retries, in ms; attempt N waits `retryBackoffMs * N`. */
+  retryBackoffMs?: number;
+}
+
+/**
+ * BUILD 23 — only a 429 (the provider explicitly rejected the request
+ * before doing any real generation work) or a 5xx (the provider's own
+ * infrastructure failed to accept it) is safe to retry here. A real request
+ * TIMEOUT is deliberately NOT retried: this is a synchronous, single-call
+ * API — if our own client gave up waiting, the provider may already be
+ * mid-generation (or have already produced billable output we never
+ * received), so blindly retrying could create a second real, paid
+ * generation for one logical request. This is the same cost-safety
+ * reasoning BUILD 21 originally used to reject ALL auto-retry for image
+ * generation, narrowed here to the two cases where it's actually safe.
+ */
+function isRetryableGenerationFailure(error: unknown): boolean {
+  return error instanceof DomainError && (error.providerCode === 'PROVIDER_RATE_LIMITED' || error.providerCode === 'PROVIDER_UNAVAILABLE');
 }
 
 function classifyGeminiError(status: number, message: string): NormalizedAdapterError {
@@ -51,6 +85,9 @@ function toImagePart(img: { data: Uint8Array; contentType: string }) {
 export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageGenerationAdapter {
   const fetchFn = config.fetchFn ?? fetch;
   const model = config.model ?? DEFAULT_MODEL;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+  const maxAttempts = config.maxAttempts ?? 2;
+  const retryBackoffMs = config.retryBackoffMs ?? 300;
 
   async function callInteractionsApi(input: unknown[], aspectRatio: string, requestId: string): Promise<GenerationResult> {
     if (!config.apiKey) {
@@ -67,44 +104,54 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
       response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: aspectRatio },
     };
 
-    let res: Response;
-    try {
-      res = await fetchWithTimeout(fetchFn, GEMINI_INTERACTIONS_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
-        body: JSON.stringify(requestBody),
-      });
-    } catch (error) {
-      if (error instanceof ProviderTimeoutError) {
-        throw new DomainError({ code: 'NANO_BANANA_PROVIDER_ERROR', message: `Gemini API request timed out: ${error.message}`, retryable: true });
-      }
-      throw error;
-    }
+    return withBoundedRetry(
+      async () => {
+        let res: Response;
+        try {
+          res = await fetchWithTimeout(
+            fetchFn,
+            GEMINI_INTERACTIONS_URL,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey! },
+              body: JSON.stringify(requestBody),
+            },
+            timeoutMs,
+          );
+        } catch (error) {
+          if (error instanceof ProviderTimeoutError) {
+            throw new DomainError({ code: 'NANO_BANANA_PROVIDER_ERROR', message: `Gemini API request timed out: ${error.message}`, retryable: true, providerCode: 'PROVIDER_TIMEOUT' });
+          }
+          throw error;
+        }
 
-    if (!res.ok) {
-      const bodyText = await res.text().catch(() => '');
-      throw new DomainError(classifyGeminiError(res.status, bodyText || res.statusText));
-    }
+        if (!res.ok) {
+          const bodyText = await res.text().catch(() => '');
+          throw new DomainError(classifyGeminiError(res.status, bodyText || res.statusText));
+        }
 
-    const responseJson = (await res.json()) as { output_image?: { data?: string; mime_type?: string }; id?: string };
-    if (!responseJson.output_image?.data) {
-      return {
-        status: 'failed',
-        outputAssetUrls: [],
-        usageMetadata: { adapter: 'nano-banana', model, note: 'No output_image in response.' },
-      };
-    }
+        const responseJson = (await res.json()) as { output_image?: { data?: string; mime_type?: string }; id?: string };
+        if (!responseJson.output_image?.data) {
+          return {
+            status: 'failed' as const,
+            outputAssetUrls: [],
+            usageMetadata: { adapter: 'nano-banana', model, note: 'No output_image in response.' },
+          };
+        }
 
-    const mimeType = responseJson.output_image.mime_type ?? 'image/jpeg';
-    return {
-      status: 'succeeded',
-      // docs/10 "output asset registration" — persisting this into AssetStore under a
-      // permanent app URL is BUILD 13's job (Image Generation Pipeline); this is the
-      // real provider output, immediately decodable, not a placeholder.
-      outputAssetUrls: [`data:${mimeType};base64,${responseJson.output_image.data}`],
-      usageMetadata: { adapter: 'nano-banana', model, requestId },
-      ...(responseJson.id ? { providerJobId: responseJson.id } : {}),
-    };
+        const mimeType = responseJson.output_image.mime_type ?? 'image/jpeg';
+        return {
+          status: 'succeeded' as const,
+          // docs/10 "output asset registration" — persisting this into AssetStore under a
+          // permanent app URL is BUILD 13's job (Image Generation Pipeline); this is the
+          // real provider output, immediately decodable, not a placeholder.
+          outputAssetUrls: [`data:${mimeType};base64,${responseJson.output_image.data}`],
+          usageMetadata: { adapter: 'nano-banana', model, requestId },
+          ...(responseJson.id ? { providerJobId: responseJson.id } : {}),
+        };
+      },
+      { maxAttempts, backoffMs: retryBackoffMs, isRetryable: isRetryableGenerationFailure },
+    );
   }
 
   return {

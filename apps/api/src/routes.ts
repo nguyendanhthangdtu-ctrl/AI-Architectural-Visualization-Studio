@@ -479,12 +479,40 @@ async function submitGeneration(params: {
     outputCount: generationResult.outputAssetUrls.length,
   });
 
-  const outputAssets = await Promise.all(
-    generationResult.outputAssetUrls.map(async (uri) => {
-      const decoded = validateImageOutput(decodeDataUri(uri));
-      return context.assetStore.put({ projectId: project.id, contentType: decoded.contentType, data: decoded.data });
-    }),
-  );
+  // BUILD 23 — a real bug fix: this block previously ran unguarded, so a
+  // provider that returned invalid output (GENERATION_OUTPUT_INVALID) or a
+  // real AssetStore write failure left the job stuck 'running' forever —
+  // the provider had already been called (and potentially billed) but the
+  // job record never reflected that the attempt was over. A stuck 'running'
+  // job also permanently blocks this exact Idempotency-Key from ever
+  // succeeding again (see the 'running' check above — it would keep
+  // rejecting every retry as GENERATION_IN_PROGRESS). Any failure here now
+  // marks the job 'failed' for real, same as a provider-call failure above.
+  let outputAssets: AssetRef[];
+  try {
+    outputAssets = await Promise.all(
+      generationResult.outputAssetUrls.map(async (uri) => {
+        const decoded = validateImageOutput(decodeDataUri(uri));
+        try {
+          return await context.assetStore.put({ projectId: project.id, contentType: decoded.contentType, data: decoded.data });
+        } catch (error) {
+          throw new DomainError({
+            code: 'ASSET_STORE_ERROR',
+            message: `Failed to persist a real, valid generated image: ${error instanceof Error ? error.message : String(error)}`,
+            retryable: true,
+          });
+        }
+      }),
+    );
+  } catch (error) {
+    await context.jobQueue.updateStatus(job.id, 'failed');
+    context.logger.error('AI provider generation output validation/persistence failed', {
+      requestId,
+      provider: adapter.id,
+      code: error instanceof DomainError ? error.code : 'INTERNAL_ERROR',
+    });
+    throw error;
+  }
 
   const finalStatus = generationResult.status === 'succeeded' ? 'succeeded' : 'failed';
   await context.jobQueue.updateStatus(job.id, finalStatus, finalStatus === 'succeeded' ? { generationResult, outputAssets } : undefined);

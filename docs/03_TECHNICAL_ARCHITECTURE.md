@@ -1717,3 +1717,49 @@ structurally; the credential itself still doesn't exist in this environment, so 
   closeable without a real credential was closed and tested; the remaining gap is exclusively the same
   external dependency already named: a real `RESEND_API_KEY` + verified sender domain, exercised once via
   `live-email-smoke.test.ts`.
+
+## 37. BUILD 23 Real AI Provider Integration & Live Image Generation Record
+
+Full writeup: `docs/BUILD_23_AI_PROVIDER_INTEGRATION.md`. This build audited the real AI image-generation path
+BUILD 21 already implemented against this build's own, largely-overlapping spec, and closed three real,
+verified gaps rather than rebuilding an already-working pipeline (CLAUDE.md rule 8).
+
+- **Cost-safe bounded retry, narrower than a blanket "retry everything"** — `nano-banana-adapter.ts` and
+  `chatgpt-image-adapter.ts` (`generate()` and `edit()`) now retry ONLY `PROVIDER_RATE_LIMITED`/
+  `PROVIDER_UNAVAILABLE` (default 2 attempts, linear backoff) — never `PROVIDER_TIMEOUT` (both are
+  synchronous single-call APIs; a client-side timeout can't distinguish "never processed" from "already
+  billed, response lost," so retrying it could double-bill) and never auth/invalid-request (permanent).
+  Implemented via a new shared `withBoundedRetry()` (`packages/shared/src/bounded-retry.ts`), extracted from
+  BUILD 22's Resend adapter (which had its own inline copy) — `resend-email-sender.ts` refactored to reuse
+  it, behavior unchanged, its full test suite re-verified passing. Both adapters also gained a real,
+  configurable `timeoutMs` (previously only `gemini-vision-engine.ts` had this) and a `providerCode:
+  'PROVIDER_TIMEOUT'` on their timeout branch (previously missing — an inconsistency versus every other
+  classified error these same adapters already tagged).
+- **A real "zombie job" bug fixed** (`submitGeneration()`, `routes.ts`) — the output-validation-and-
+  persistence step ran unguarded: a bad provider response or a genuine `AssetStore.put()` failure left the
+  `JobRecord` stuck `'running'` forever, which BUILD 21's own idempotency dedup then treated as "still
+  mid-flight," permanently rejecting any retry of that exact key with `409 GENERATION_IN_PROGRESS` — even
+  after the underlying problem was fixed. Now wrapped in try/catch: any failure marks the job `'failed'` for
+  real. New `ASSET_STORE_ERROR` (500) distinguishes a genuine storage failure from a bad provider response
+  (`GENERATION_OUTPUT_INVALID`). Two new regression tests prove the job reaches `'failed'` (not stuck) and
+  that the same idempotency key succeeds on retry once the problem clears.
+- **Everything else in this build's spec was audited, not rebuilt**: the provider abstraction, prompt-engine
+  authority, reference-image flow, output validation, asset ownership/signed retrieval, `/ready`'s provider
+  status, observability, the UI's existing error states, and `live-provider-smoke.test.ts` were all already
+  real and tested as of BUILD 21/22 — confirmed via the full regression suite, not reimplemented. This
+  build's requested error-code names map 1:1 onto the existing `providerCode` taxonomy (documented in full in
+  `docs/BUILD_23_AI_PROVIDER_INTEGRATION.md` §4) — kept the working names rather than renaming a tested
+  taxonomy.
+- **No new environment variables** — per-provider credential names (`NANO_BANANA_API_KEY` etc.) preserved
+  exactly, per this build's own instruction to reuse an existing credential variable rather than introduce a
+  generic `AI_PROVIDER`/`AI_MODEL` selector.
+- **569/569 tests pass, 3 correctly skipped** (was 559/3 at the end of BUILD 22 — +10 new tests: the shared
+  retry utility, both adapters' new retry/timeout paths, and the two zombie-job regression tests); typecheck,
+  lint, and production build all clean; built `apps/web` bundle grepped for every AI provider key name — zero
+  matches.
+- **Live AI provider**: unchanged from BUILD 21 — zero credentials exist in this environment, so
+  `live-provider-smoke.test.ts` correctly skips every provider-gated sub-test. No live generation is claimed.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, not PRODUCTION READY. Every structural gap
+  closeable without a real credential was closed and tested; the remaining gap is exclusively the same
+  external dependency already named across BUILD 19-22: at least one real AI provider key exercised once via
+  `live-provider-smoke.test.ts`.

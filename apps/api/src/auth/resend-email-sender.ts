@@ -5,6 +5,7 @@ import {
   fetchWithTimeout,
   ProviderTimeoutError,
   sanitizeProviderErrorBody,
+  withBoundedRetry,
 } from '@avs/shared';
 import type { EmailMessage, EmailSendResult, EmailSender } from './email-sender.js';
 import { validateEmailMessage } from './email-sender.js';
@@ -61,10 +62,6 @@ function classifyResendError(status: number, message: string): DomainError {
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function createResendEmailSender(config: ResendEmailSenderConfig): EmailSender {
   const fetchFn = config.fetchFn ?? fetch;
   const timeoutMs = config.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
@@ -92,51 +89,48 @@ export function createResendEmailSender(config: ResendEmailSenderConfig): EmailS
         ...(email.replyTo ?? config.replyTo ? { reply_to: email.replyTo ?? config.replyTo } : {}),
       };
 
-      let lastError: DomainError | undefined;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          const res = await fetchWithTimeout(
-            fetchFn,
-            RESEND_API_URL,
-            {
-              method: 'POST',
-              headers: {
-                'content-type': 'application/json',
-                authorization: `Bearer ${config.apiKey}`,
-                // Real, documented Resend header — lets the vendor itself dedupe a retried
-                // request server-side, so this loop's own retry (or a future caller's) can
-                // never result in two delivered emails for the same logical send.
-                ...(email.idempotencyKey ? { 'idempotency-key': email.idempotencyKey } : {}),
+      // BUILD 23 — the retry loop itself now lives in @avs/shared's
+      // withBoundedRetry (extracted from this exact loop, previously
+      // inline here) so image-generation adapters can reuse the identical,
+      // already-tested mechanism instead of a second copy (CLAUDE.md rule 9).
+      return withBoundedRetry(
+        async () => {
+          try {
+            const res = await fetchWithTimeout(
+              fetchFn,
+              RESEND_API_URL,
+              {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  authorization: `Bearer ${config.apiKey}`,
+                  // Real, documented Resend header — lets the vendor itself dedupe a retried
+                  // request server-side, so this loop's own retry (or a future caller's) can
+                  // never result in two delivered emails for the same logical send.
+                  ...(email.idempotencyKey ? { 'idempotency-key': email.idempotencyKey } : {}),
+                },
+                body: JSON.stringify(requestBody),
               },
-              body: JSON.stringify(requestBody),
-            },
-            timeoutMs,
-          );
+              timeoutMs,
+            );
 
-          if (!res.ok) {
-            const bodyText = await res.text().catch(() => '');
-            throw classifyResendError(res.status, bodyText || res.statusText);
+            if (!res.ok) {
+              const bodyText = await res.text().catch(() => '');
+              throw classifyResendError(res.status, bodyText || res.statusText);
+            }
+
+            const responseJson = (await res.json()) as ResendSuccessResponse;
+            return { status: 'sent' as const, ...(responseJson.id ? { providerMessageId: responseJson.id } : {}) };
+          } catch (error) {
+            if (error instanceof ProviderTimeoutError) {
+              throw new DomainError({ code: 'EMAIL_PROVIDER_ERROR', message: `Resend API request timed out: ${error.message}`, retryable: true, providerCode: 'PROVIDER_TIMEOUT' });
+            }
+            if (error instanceof DomainError) throw error;
+            throw new DomainError({ code: 'EMAIL_PROVIDER_ERROR', message: error instanceof Error ? error.message : String(error), retryable: false, providerCode: 'INTERNAL_ERROR' });
           }
-
-          const responseJson = (await res.json()) as ResendSuccessResponse;
-          return { status: 'sent', ...(responseJson.id ? { providerMessageId: responseJson.id } : {}) };
-        } catch (error) {
-          const domainError =
-            error instanceof ProviderTimeoutError
-              ? new DomainError({ code: 'EMAIL_PROVIDER_ERROR', message: `Resend API request timed out: ${error.message}`, retryable: true, providerCode: 'PROVIDER_TIMEOUT' })
-              : error instanceof DomainError
-                ? error
-                : new DomainError({ code: 'EMAIL_PROVIDER_ERROR', message: error instanceof Error ? error.message : String(error), retryable: false, providerCode: 'INTERNAL_ERROR' });
-
-          lastError = domainError;
-          if (!domainError.retryable || attempt === maxAttempts) {
-            throw domainError;
-          }
-          await sleep(retryBackoffMs * attempt);
-        }
-      }
-      // Unreachable — the loop above always either returns or throws — but keeps TypeScript's control-flow analysis satisfied.
-      throw lastError ?? new DomainError({ code: 'EMAIL_PROVIDER_ERROR', message: 'Resend send failed with no captured error.', retryable: false });
+        },
+        { maxAttempts, backoffMs: retryBackoffMs, isRetryable: (error) => error instanceof DomainError && error.retryable },
+      );
     },
   };
 }
