@@ -23,7 +23,10 @@ function fillValidScenario() {
   fireEvent.change(screen.getByLabelText('Aspect Ratio'), { target: { value: '2:3' } });
   fireEvent.change(screen.getByLabelText('Generation Resolution'), { target: { value: '2K' } });
   fireEvent.change(screen.getByLabelText('Upscale Resolution'), { target: { value: '4K' } });
-  fireEvent.change(screen.getByLabelText('AI Image Model'), { target: { value: 'Auto' } });
+  // BUILD 27 FIX — 'Auto' no longer exists as a choice; ChatGPT Image supports
+  // '2:3' (its capabilities().supportedAspectRatios includes it), same as 'Auto'
+  // previously never disabled anything for an unrecognized/no-op renderCore.
+  fireEvent.change(screen.getByLabelText('AI Image Model'), { target: { value: 'ChatGPT Image' } });
 }
 
 describe('ScenarioSlots', () => {
@@ -62,7 +65,7 @@ describe('ScenarioSlots', () => {
 
   it('BUILD 26: warns and keeps Apply Scenario disabled when the selected Aspect Ratio is incompatible with the selected model', () => {
     renderScenarioSlots();
-    fillValidScenario(); // ends with renderCore: 'Auto', aspectRatio: '2:3' — both currently valid together
+    fillValidScenario(); // ends with renderCore: 'ChatGPT Image', aspectRatio: '2:3' — both currently valid together
     // Switch back to Nano Banana 2, which does NOT support '2:3'.
     fireEvent.change(screen.getByLabelText('AI Image Model'), { target: { value: 'Nano Banana' } });
 
@@ -75,7 +78,15 @@ describe('ScenarioSlots', () => {
     expect(screen.queryByRole('option', { name: /Google Flow/i })).not.toBeInTheDocument();
   });
 
-  it('BUILD 27: offers Nano Banana Pro as the second AI Image Model choice, after Nano Banana 2 and before ChatGPT Image', () => {
+  it('BUILD 27 FIX: never offers "Auto" as a visible AI Image Model choice — every generation now names a real model', () => {
+    renderScenarioSlots();
+    // Scoped to the AI Image Model select specifically — Sun Direction legitimately has its own,
+    // unrelated 'Auto' option (SCENARIO_SUN_DIRECTIONS) that this fix must never touch.
+    const select = screen.getByLabelText('AI Image Model') as HTMLSelectElement;
+    expect(Array.from(select.options).some((o) => o.value === 'Auto')).toBe(false);
+  });
+
+  it('BUILD 27 FIX: offers exactly three AI Image Models, in the exact required order — Nano Banana 2, Nano Banana Pro, ChatGPT Image', () => {
     renderScenarioSlots();
     const select = screen.getByLabelText('AI Image Model') as HTMLSelectElement;
     const optionLabels = Array.from(select.options).map((o) => o.textContent);
@@ -84,7 +95,6 @@ describe('ScenarioSlots', () => {
       'Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)',
       'Nano Banana Pro — Google Gemini (gemini-3-pro-image)',
       'ChatGPT Image — openai (gpt-image-1)',
-      'Auto',
     ]);
   });
 

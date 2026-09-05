@@ -381,12 +381,8 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
     await expect(res.json()).resolves.toMatchObject({ code: 'NOT_IMPLEMENTED' });
   });
 
-  it("'Auto' resolves to a real adapter (nano-banana), not the unimplemented Google Flow adapter", async () => {
+  it('BUILD 27 FIX: rejects "Auto" as an invalid renderCore — the AI Image Model selector no longer offers or accepts it', async () => {
     const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
-    context.imageGenerationService = new ImageGenerationService({
-      'nano-banana': fakeSucceedingAdapter('nano-banana'),
-      'google-flow': fakeSucceedingAdapter('google-flow'),
-    });
     await start(context);
     const session = await registerTestUser(baseUrl);
     const { project, asset } = await createProjectAndAsset(session);
@@ -395,8 +391,8 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...VALID_BODY, renderCore: 'Auto', sourceAssetId: asset.id, referenceAssetIds: [] }),
     }, session.cookie));
-    const body = (await res.json()) as { generation: { provider: string } };
-    expect(body.generation.provider).toBe('nano-banana');
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('marks the job failed, not silently succeeded, when the adapter throws', async () => {

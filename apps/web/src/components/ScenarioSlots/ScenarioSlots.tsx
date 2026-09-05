@@ -27,15 +27,25 @@ type SelectFieldKey = Exclude<keyof ScenarioInput, 'artificialLighting'>;
 /**
  * BUILD 25 (Multi-Model Image Engine) — "AI Image Model" only ever lists
  * models the registry (`@avs/ai-core`'s `image-model-registry.ts`) marks
- * `enabled: true` (never the still-`NOT_IMPLEMENTED` Google Flow), plus
- * `Auto` — a selection strategy, not a model, always offered. `renderCore`
- * itself still validates against the full, unchanged
+ * `enabled: true` (never the still-`NOT_IMPLEMENTED` Google Flow).
+ *
+ * BUILD 27 FIX — a real, non-model "Auto" choice (a selection strategy, not
+ * a model) was previously appended here too; removed entirely per this
+ * fix's own mandate. The selector now offers exactly the three real,
+ * enabled models — Nano Banana 2, Nano Banana Pro, ChatGPT Image — nothing
+ * else. `renderCore` itself still validates against the unchanged
  * `SCENARIO_RENDER_CORES` vocabulary server-side (`scenario.ts`) — this only
- * narrows what's visibly OFFERED here, never the underlying schema.
+ * narrows what's visibly OFFERED here, never that shared domain vocabulary
+ * (also used, unrelated to this selector, by Prompt Engine/Reasoning Engine
+ * fixtures — left untouched, out of this fix's scope). The real, hard
+ * removal that actually prevents "Auto" from ever reaching a provider is at
+ * the API boundary: `renderCoreSchema` (apps/api/src/schemas.ts) and
+ * `RenderCoreSelection` (packages/model-adapters/src/service.ts) no longer
+ * accept it at all.
  */
-const AI_IMAGE_MODEL_OPTIONS = [...getEnabledImageModels().map((model) => model.renderCore), 'Auto'];
+const AI_IMAGE_MODEL_OPTIONS = getEnabledImageModels().map((model) => model.renderCore);
 
-/** "Nano Banana" -> "Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)"; any value with no registry entry (e.g. "Auto") renders unchanged. */
+/** "Nano Banana" -> "Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)"; any value with no registry entry renders unchanged. */
 function renderCoreOptionLabel(renderCore: string): string {
   const model = findImageModelByRenderCore(renderCore);
   return model ? `${model.displayName} — ${model.provider === 'google-gemini' ? 'Google Gemini' : model.provider} (${model.id})` : renderCore;

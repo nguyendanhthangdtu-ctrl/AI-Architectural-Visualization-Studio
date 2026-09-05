@@ -1,7 +1,8 @@
 import { DomainError } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 
-export type RenderCoreSelection = 'nano-banana' | 'nano-banana-pro' | 'google-flow' | 'chatgpt-image' | 'auto';
+/** BUILD 27 FIX — 'auto' removed: real model selection only, no "let the server pick" fallback strategy. */
+export type RenderCoreSelection = 'nano-banana' | 'nano-banana-pro' | 'google-flow' | 'chatgpt-image';
 
 /**
  * ImageGenerationService — docs/03_TECHNICAL_ARCHITECTURE.md §6. Resolves a
@@ -12,17 +13,6 @@ export class ImageGenerationService {
   constructor(private readonly adapters: Record<string, ImageGenerationAdapter>) {}
 
   resolve(renderCore: RenderCoreSelection): ImageGenerationAdapter {
-    if (renderCore === 'auto') {
-      const first = Object.values(this.adapters)[0];
-      if (!first) {
-        throw new DomainError({
-          code: 'NO_ADAPTERS_REGISTERED',
-          message: 'No adapters registered for Auto selection.',
-          retryable: false,
-        });
-      }
-      return first;
-    }
     const adapter = this.adapters[renderCore];
     if (!adapter) {
       throw new DomainError({

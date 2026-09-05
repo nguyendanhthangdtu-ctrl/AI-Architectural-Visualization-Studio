@@ -37,8 +37,8 @@ describe('BUILD 02 smoke test', () => {
   });
 
   it('loads the provider-agnostic ImageGenerationService from @avs/model-adapters', () => {
-    const service = new ImageGenerationService({ auto: new FutureAdapter() });
-    expect(service.resolve('auto')).toBeInstanceOf(FutureAdapter);
+    const service = new ImageGenerationService({ 'nano-banana': new FutureAdapter() });
+    expect(service.resolve('nano-banana')).toBeInstanceOf(FutureAdapter);
   });
 
   it('loads the real, node:sqlite-backed storage reference implementation from @avs/storage-adapters (BUILD 18)', () => {

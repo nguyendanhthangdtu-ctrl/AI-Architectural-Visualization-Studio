@@ -278,12 +278,12 @@ export async function handleExtractReference(
   sendJson(res, 201, { referenceId: referenceRecord.id, extractedVisualLanguage });
 }
 
+/** BUILD 27 FIX — 'Auto' removed: `renderCoreSchema` no longer accepts it, so this map covers only real models/render cores now. */
 const RENDER_CORE_SELECTION: Record<RunGenerationRequest['renderCore'], RenderCoreSelection> = {
   'Nano Banana': 'nano-banana',
   'Nano Banana Pro': 'nano-banana-pro',
   'Google Flow': 'google-flow',
   'ChatGPT Image': 'chatgpt-image',
-  Auto: 'auto',
 };
 
 /**

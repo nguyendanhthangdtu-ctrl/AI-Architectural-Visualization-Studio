@@ -1887,7 +1887,14 @@ third real, selectable AI Image Model alongside Nano Banana 2 (default, unchange
 - **Registry, schema, and selection-map extensions** — `SCENARIO_RENDER_CORES`, `renderCoreSchema`,
   `RenderCoreSelection`, `RENDER_CORE_SELECTION`, and `IMAGE_MODEL_REGISTRY` each gained one new,
   additive entry (`'Nano Banana Pro'` / `'nano-banana-pro'` / `gemini-3-pro-image`). Registry order (and
-  therefore the selector's order): Nano Banana 2 → Nano Banana Pro → ChatGPT Image → Auto.
+  therefore the selector's order): Nano Banana 2 → Nano Banana Pro → ChatGPT Image.
+- **BUILD 27 FIX** — this build's initial selector also appended a non-model `'Auto'` choice; found to
+  be a defect and removed entirely (UI dropdown, `renderCoreSchema` — now rejects it with
+  `VALIDATION_ERROR`, `RENDER_CORE_SELECTION`, and `ImageGenerationService`'s `'auto'`
+  "pick by capability + policy" fallback branch, deleted outright). `SCENARIO_RENDER_CORES` itself
+  deliberately keeps `'Auto'` as an unrelated, unreachable-from-the-UI vocabulary member — shared with
+  Prompt Engine/Reasoning Engine test fixtures out of this fix's scope. See
+  `docs/BUILD_27_NANO_BANANA_PRO.md`'s own "BUILD 27 FIX" note for full detail.
 - **Real, current-docs-validated capabilities** — resolution `1K`/`2K`/`4K`; aspect ratio `1:1`/`3:2`/
   `2:3`/`4:3`/`16:9`/`9:16`/`21:9` (every non-`Custom` value this app already offers). Nano Banana 2's own
   narrower, already-validated aspect-ratio set is left untouched (CLAUDE.md rule 8). BUILD 26's existing
@@ -1907,8 +1914,9 @@ third real, selectable AI Image Model alongside Nano Banana 2 (default, unchange
 - **Live Mode**: no live call made or required this gate; `live-provider-smoke.test.ts` gained an opt-in-
   only Nano Banana Pro case, gated identically to the existing Nano Banana case (skipped unless
   `RUN_LIVE_PROVIDER_SMOKE_TEST=true` and `NANO_BANANA_API_KEY` are both set).
-- **613/613 tests pass, 3 correctly skipped** (was 604/3 at the end of BUILD 26 — +9 new tests); typecheck,
-  lint, and production build all clean; built `apps/web` bundle re-grepped for every provider key/header
-  name — zero matches.
+- **614/614 tests pass, 3 correctly skipped** (was 604/3 at the end of BUILD 26 — +10 net new tests, after
+  the BUILD 27 FIX pass removed one stale "Auto succeeds" test and added several "Auto is gone/rejected"
+  tests); typecheck, lint, and production build all clean; built `apps/web` bundle re-grepped for every
+  provider key/header name — zero matches.
 - **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, unchanged — no live Gemini/OpenAI
   credential exists in this environment; this build does not claim PRODUCTION READY (CLAUDE.md rule 7).

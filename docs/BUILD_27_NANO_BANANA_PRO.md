@@ -16,9 +16,23 @@ not touch the render pipeline, remove any existing provider/model, or change any
 | Google Flow | Google | `google-flow` | — | No | No (`NOT_IMPLEMENTED`, unchanged since BUILD 12 — no official public API exists) |
 
 Selector order (`ScenarioSlots.tsx`'s "AI Image Model" field, `packages/ai-core/src/image-model-registry.ts`'s
-`getEnabledImageModels()`): **Nano Banana 2 → Nano Banana Pro → ChatGPT Image → Auto**. Only these four
+`getEnabledImageModels()`): **Nano Banana 2 → Nano Banana Pro → ChatGPT Image**. Only these three
 options are ever shown — Google Flow and any hypothetical "Local AI" are never offered (the latter does
 not exist anywhere in this codebase; there was nothing to remove).
+
+> **BUILD 27 FIX** — an initial version of this build's selector also appended a non-model **"Auto"**
+> choice (a selection strategy, not a real model). This was found to be a defect and removed entirely:
+> from the UI dropdown (`ScenarioSlots.tsx`), the wire-level `renderCoreSchema`
+> (`apps/api/src/schemas.ts`, generation/view/regenerate requests now reject it with
+> `VALIDATION_ERROR`), the `RENDER_CORE_SELECTION` map (`apps/api/src/routes.ts`), and
+> `RenderCoreSelection`/`ImageGenerationService.resolve()`'s "pick by capability + policy" fallback
+> branch (`packages/model-adapters/src/service.ts`) — deleted, not just hidden. Every generation now
+> names one of the three real models explicitly; there is no "let the server pick" path anymore.
+> `SCENARIO_RENDER_CORES` (`packages/ai-core/src/scenario-vocabulary.ts`) deliberately still contains
+> `'Auto'` as a vocabulary member — that constant is shared, unrelated, generic-placeholder fixture
+> value in several Prompt Engine/Reasoning Engine domain tests untouched by this fix (out of scope,
+> per this fix's own "KHÔNG thay đổi Prompt Engine" instruction); it is unreachable from any real user
+> path now that the UI and the API schema both refuse it.
 
 `gemini-3-pro-image` is a real, stable, current Google model id — validated against current official
 documentation (accessed 2026-09-05): `https://ai.google.dev/gemini-api/docs/gemini-3`,

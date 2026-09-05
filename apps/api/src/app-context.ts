@@ -143,10 +143,10 @@ export interface AppContext {
  *
  * Each provider key is optional: without it, that provider's `generate()`
  * throws PROVIDER_NOT_CONFIGURED rather than the server failing to start.
- * Adapters are registered `nano-banana` first so `RenderCoreSelection: 'auto'`
- * (ImageGenerationService.resolve, "picks by capability + policy" per docs/03
- * §7) resolves to a real, working adapter rather than the still-NOT_IMPLEMENTED
- * `google-flow` (BUILD 12 finding — no official public API exists for it).
+ * (BUILD 27 FIX: `RenderCoreSelection`'s prior `'auto'` "pick by capability +
+ * policy" fallback was removed entirely — every generation now names a real
+ * model explicitly. Registration order below no longer carries that
+ * significance; it's kept as-is only for historical file-diff minimalism.)
  */
 export function createAppContext(
   config: {

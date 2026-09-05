@@ -204,7 +204,7 @@ export async function extractReferenceVisualLanguage(
 
 export interface RunGenerationParams {
   promptText: string;
-  renderCore: 'Nano Banana' | 'Nano Banana Pro' | 'Google Flow' | 'ChatGPT Image' | 'Auto';
+  renderCore: 'Nano Banana' | 'Nano Banana Pro' | 'Google Flow' | 'ChatGPT Image';
   aspectRatio: string;
   resolution: string;
   sourceAssetId: string;
@@ -268,7 +268,7 @@ export async function runEdit(projectId: string, generationId: string, params: R
 
 export interface RunViewParams {
   promptText: string;
-  renderCore: 'Nano Banana' | 'Nano Banana Pro' | 'Google Flow' | 'ChatGPT Image' | 'Auto';
+  renderCore: 'Nano Banana' | 'Nano Banana Pro' | 'Google Flow' | 'ChatGPT Image';
   aspectRatio: string;
   resolution: string;
   sourceAssetId: string;

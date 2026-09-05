@@ -82,8 +82,15 @@ export const runReferenceExtractionRequestSchema = z.object({
 
 export type RunReferenceExtractionRequest = z.infer<typeof runReferenceExtractionRequestSchema>;
 
-/** docs/07_SCENARIO_BUILDER_SPEC.md render-core vocabulary (BUILD 13; BUILD 27 added 'Nano Banana Pro') — the same Title Case values ScenarioSlots collects. */
-export const renderCoreSchema = z.enum(['Nano Banana', 'Nano Banana Pro', 'Google Flow', 'ChatGPT Image', 'Auto']);
+/**
+ * docs/07_SCENARIO_BUILDER_SPEC.md render-core vocabulary (BUILD 13; BUILD 27
+ * added 'Nano Banana Pro') — the same Title Case values ScenarioSlots
+ * collects. BUILD 27 FIX — 'Auto' removed entirely: a generation/view/
+ * regenerate request naming it is now rejected with `VALIDATION_ERROR`
+ * before ever reaching `ImageGenerationService`, rather than being silently
+ * resolved to a default adapter.
+ */
+export const renderCoreSchema = z.enum(['Nano Banana', 'Nano Banana Pro', 'Google Flow', 'ChatGPT Image']);
 
 /** docs/11_IMAGE_GENERATION_SPEC.md step 1 "Validate request" (BUILD 13). */
 export const runGenerationRequestSchema = z.object({
