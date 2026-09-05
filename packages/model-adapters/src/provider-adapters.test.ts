@@ -25,7 +25,7 @@ describe('Google Flow adapter — no official public API exists (BUILD 12 findin
   });
 });
 
-describe('all three render-core adapters are resolvable through ImageGenerationService', () => {
+describe('all render-core adapters are resolvable through ImageGenerationService', () => {
   it('resolves each by id, alongside the FutureAdapter test double pattern', () => {
     const service = new ImageGenerationService({
       'nano-banana': createNanoBananaAdapter({ apiKey: undefined }),
@@ -35,5 +35,20 @@ describe('all three render-core adapters are resolvable through ImageGenerationS
     expect(service.resolve('nano-banana').id).toBe('nano-banana');
     expect(service.resolve('google-flow').id).toBe('google-flow');
     expect(service.resolve('chatgpt-image').id).toBe('chatgpt-image');
+  });
+
+  it('BUILD 27: resolves nano-banana-pro to its own distinct adapter instance/capabilities, sharing the Nano Banana adapter implementation', () => {
+    const service = new ImageGenerationService({
+      'nano-banana': createNanoBananaAdapter({ apiKey: undefined }),
+      'nano-banana-pro': createNanoBananaAdapter({
+        apiKey: undefined,
+        model: 'gemini-3-pro-image',
+        id: 'nano-banana-pro',
+        capabilities: { maxResolution: '4K', supportedAspectRatios: ['1:1', '3:2', '2:3', '4:3', '16:9', '9:16', '21:9'] },
+      }),
+    });
+    expect(service.resolve('nano-banana-pro').id).toBe('nano-banana-pro');
+    expect(service.resolve('nano-banana-pro').capabilities().supportedAspectRatios).toContain('21:9');
+    expect(service.resolve('nano-banana').capabilities().supportedAspectRatios).not.toContain('21:9');
   });
 });

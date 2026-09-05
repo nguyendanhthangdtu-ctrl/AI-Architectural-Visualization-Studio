@@ -70,4 +70,5 @@ export const SCENARIO_ASPECT_RATIOS = ['1:1', '4:3', '3:2', '16:9', '9:16', '2:3
 /** Used for both generationResolution and upscaleResolution — docs/07 "Keep generation and upscale resolution distinct" (two fields, one shared vocabulary). */
 export const SCENARIO_RESOLUTIONS = ['Preview', '2K', '4K', '6K', '8K/Ultra'] as const;
 
-export const SCENARIO_RENDER_CORES = ['Nano Banana', 'Google Flow', 'ChatGPT Image', 'Auto'] as const;
+/** BUILD 27 (Multi-Model Image Engine: Nano Banana 2 + Nano Banana Pro + ChatGPT Image) — added 'Nano Banana Pro', a real, distinct, callable model (gemini-3-pro-image), never a renamed/aliased Nano Banana 2. */
+export const SCENARIO_RENDER_CORES = ['Nano Banana', 'Nano Banana Pro', 'Google Flow', 'ChatGPT Image', 'Auto'] as const;

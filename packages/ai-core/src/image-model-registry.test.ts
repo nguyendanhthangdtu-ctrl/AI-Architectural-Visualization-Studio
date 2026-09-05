@@ -48,6 +48,23 @@ describe('IMAGE_MODEL_REGISTRY (BUILD 25 Multi-Model Image Engine)', () => {
     expect(findImageModelByRenderCore(DEFAULT_IMAGE_MODEL_RENDER_CORE)?.id).toBe('gemini-3.1-flash-image');
   });
 
+  it('BUILD 27: contains Nano Banana Pro with the exact required id/provider/displayName, distinct from Nano Banana 2', () => {
+    const nanoBananaPro = findImageModelByRenderCore('Nano Banana Pro');
+    expect(nanoBananaPro).toMatchObject({
+      id: 'gemini-3-pro-image',
+      provider: 'google-gemini',
+      displayName: 'Nano Banana Pro',
+      type: 'image-generation',
+      enabled: true,
+      configKey: 'nanoBananaPro',
+    });
+    expect(nanoBananaPro?.id).not.toBe(findImageModelByRenderCore('Nano Banana')?.id);
+  });
+
+  it('BUILD 27: enabled image models are offered in the exact required order — Nano Banana 2, Nano Banana Pro, ChatGPT Image', () => {
+    expect(getEnabledImageModels().map((m) => m.renderCore)).toEqual(['Nano Banana', 'Nano Banana Pro', 'ChatGPT Image']);
+  });
+
   it('excludes Google Flow from enabled models — no public API exists for it (BUILD 12 finding, unchanged)', () => {
     const enabled = getEnabledImageModels();
     expect(enabled.some((m) => m.renderCore === 'Google Flow')).toBe(false);

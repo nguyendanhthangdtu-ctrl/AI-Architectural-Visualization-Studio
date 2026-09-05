@@ -1,7 +1,7 @@
 import { DomainError } from '@avs/shared';
 import type { ImageGenerationAdapter } from './adapter.js';
 
-export type RenderCoreSelection = 'nano-banana' | 'google-flow' | 'chatgpt-image' | 'auto';
+export type RenderCoreSelection = 'nano-banana' | 'nano-banana-pro' | 'google-flow' | 'chatgpt-image' | 'auto';
 
 /**
  * ImageGenerationService — docs/03_TECHNICAL_ARCHITECTURE.md §6. Resolves a

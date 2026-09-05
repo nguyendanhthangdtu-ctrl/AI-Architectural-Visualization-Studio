@@ -15,6 +15,7 @@ import {
   type ScenarioInput,
 } from '@avs/ai-core';
 import type { ErrorEnvelope } from '@avs/shared';
+import type { ReadinessProviders } from '../../api/client.js';
 import { toErrorEnvelope } from '../../api/errors.js';
 import { ErrorState } from '../ErrorState/ErrorState.js';
 import { StatusIndicator } from '../StatusIndicator/StatusIndicator.js';
@@ -38,6 +39,27 @@ const AI_IMAGE_MODEL_OPTIONS = [...getEnabledImageModels().map((model) => model.
 function renderCoreOptionLabel(renderCore: string): string {
   const model = findImageModelByRenderCore(renderCore);
   return model ? `${model.displayName} — ${model.provider === 'google-gemini' ? 'Google Gemini' : model.provider} (${model.id})` : renderCore;
+}
+
+/**
+ * BUILD 27 — "Nếu provider chưa có credential thì UI vẫn hiển thị model
+ * nhưng trạng thái phải là 'Chưa cấu hình'." Purely informational: the model
+ * stays fully selectable either way (never disabled here — that would wrongly
+ * conflate "not yet configured" with "not supported," and the user IS allowed
+ * to pick it, e.g. to prepare a scenario ahead of a credential being added).
+ * `providerConfiguration` is `null` until the one-time `GET /ready` fetch at
+ * app bootstrap resolves (or if it fails) — renders no suffix at all then,
+ * never a false "not configured".
+ */
+function configuredSuffix(renderCore: string, providerConfiguration: ReadinessProviders | null): string {
+  const model = findImageModelByRenderCore(renderCore);
+  if (!model || !providerConfiguration) return '';
+  // `model.configKey` can be 'googleFlow' (no field on ReadinessProviders — Google
+  // Flow tracks no real credential at all, see app-context.ts) — this never actually
+  // reaches that case today since Google Flow is excluded from AI_IMAGE_MODEL_OPTIONS,
+  // but the lookup stays defensive rather than assuming every configKey resolves.
+  const check = (providerConfiguration as Record<string, { configured: boolean } | undefined>)[model.configKey];
+  return check?.configured === false ? ' — Not configured' : '';
 }
 
 /**
@@ -172,6 +194,7 @@ export function ScenarioSlots() {
               {field.options.map((option) => (
                 <option key={option} value={option} disabled={field.isOptionDisabled?.(option, draft) ?? false}>
                   {field.getOptionLabel ? field.getOptionLabel(option) : option}
+                  {field.key === 'renderCore' ? configuredSuffix(option, state.providerConfiguration) : ''}
                 </option>
               ))}
             </select>

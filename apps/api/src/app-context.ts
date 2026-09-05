@@ -113,6 +113,8 @@ export interface AppContext {
   providerConfiguration: Readonly<{
     gemini: boolean;
     nanoBanana: boolean;
+    /** BUILD 27 — Nano Banana Pro (gemini-3-pro-image); shares Nano Banana 2's NANO_BANANA_API_KEY credential, reported as its own model-level boolean. */
+    nanoBananaPro: boolean;
     chatgptImage: boolean;
     veo: boolean;
     /** BUILD 22 — true only when a real vendor (`EMAIL_PROVIDER=resend`) AND its credential are both configured; `InMemoryEmailSender` (no real vendor) is always `false`. */
@@ -185,6 +187,18 @@ export function createAppContext(
     generationRepository: new SqliteGenerationRepository(db),
     imageGenerationService: new ImageGenerationService({
       'nano-banana': createNanoBananaAdapter({ apiKey: config.nanoBananaApiKey }),
+      // BUILD 27 — Nano Banana Pro reuses this SAME adapter factory (real,
+      // validated Interactions API contract shared with Nano Banana 2, see
+      // nano-banana-adapter.ts's own doc comment), only the model id,
+      // adapter id, and real capability ceiling differ. Same
+      // NANO_BANANA_API_KEY credential — this is one Google Gemini account,
+      // two of its models, not two separate integrations.
+      'nano-banana-pro': createNanoBananaAdapter({
+        apiKey: config.nanoBananaApiKey,
+        model: 'gemini-3-pro-image',
+        id: 'nano-banana-pro',
+        capabilities: { maxResolution: '4K', supportedAspectRatios: ['1:1', '3:2', '2:3', '4:3', '16:9', '9:16', '21:9'] },
+      }),
       'chatgpt-image': createChatGPTImageAdapter({ apiKey: config.chatgptImageApiKey }),
       'google-flow': new GoogleFlowAdapter(),
     }),
@@ -221,6 +235,12 @@ export function createAppContext(
     providerConfiguration: {
       gemini: Boolean(config.geminiApiKey),
       nanoBanana: Boolean(config.nanoBananaApiKey),
+      // BUILD 27 — Nano Banana Pro shares Nano Banana 2's real credential
+      // (both read NANO_BANANA_API_KEY, per this build's own instruction to
+      // keep env vars unchanged), so its own configuration boolean is
+      // identical in value — reported as its own field regardless, since
+      // GET /ready describes each MODEL, not each underlying secret.
+      nanoBananaPro: Boolean(config.nanoBananaApiKey),
       chatgptImage: Boolean(config.chatgptImageApiKey),
       veo: Boolean(config.veoApiKey),
       email: config.emailProvider === 'resend' && Boolean(config.resendApiKey),

@@ -4,7 +4,7 @@ import { AuthGate } from './components/AuthGate/AuthGate.js';
 import { ModuleLanding } from './components/ModuleLanding/ModuleLanding.js';
 import { ModuleWorkspace } from './components/ModuleWorkspace/ModuleWorkspace.js';
 import { ProjectWorkspacePlaceholder } from './components/ProjectWorkspacePlaceholder/ProjectWorkspacePlaceholder.js';
-import { getCurrentUser } from './api/client.js';
+import { getCurrentUser, getProviderConfiguration } from './api/client.js';
 import { ProjectSessionProvider, useProjectSessionActions, useProjectSessionState } from './state/ProjectSessionContext.js';
 import { RouterProvider, useRouter } from './state/router.js';
 
@@ -37,9 +37,19 @@ function AuthenticatedApp() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const user = await getCurrentUser().catch(() => null);
+      // BUILD 27 — fetched alongside auth, never gating it: a failed/slow
+      // /ready call must never delay or block reaching the real app, so this
+      // resolves to `null` (informational-only, "unknown") rather than
+      // rejecting the whole bootstrap.
+      const [user, providerConfiguration] = await Promise.all([
+        getCurrentUser().catch(() => null),
+        getProviderConfiguration().catch(() => null),
+      ]);
       if (cancelled) return;
-      setState(user ? { currentUser: user, authStatus: 'signedIn' } : { authStatus: 'signedOut' });
+      setState({
+        ...(user ? { currentUser: user, authStatus: 'signedIn' } : { authStatus: 'signedOut' }),
+        providerConfiguration,
+      });
     })();
     return () => {
       cancelled = true;

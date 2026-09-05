@@ -353,6 +353,20 @@ describe('apps/api generation route (BUILD 13 Image Generation Pipeline)', () =>
     await expect(res.json()).resolves.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
   });
 
+  it('BUILD 27: returns 503 PROVIDER_NOT_CONFIGURED for Nano Banana Pro when no key is set — same shared credential, same honest state', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET }); // no provider keys
+    await start(context);
+    const session = await registerTestUser(baseUrl);
+    const { project, asset } = await createProjectAndAsset(session);
+    const res = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...VALID_BODY, renderCore: 'Nano Banana Pro', sourceAssetId: asset.id, referenceAssetIds: [] }),
+    }, session.cookie));
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
+  });
+
   it('returns 501 NOT_IMPLEMENTED for Google Flow — the documented BUILD 12 finding, and marks the job failed', async () => {
     const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
     await start(context);

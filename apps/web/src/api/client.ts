@@ -103,6 +103,34 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
 }
 
 /**
+ * BUILD 27 — booleans only ("a credential is present"), the exact same safe
+ * shape `GET /ready` has returned since BUILD 19/21; never the credential
+ * itself. Lets the AI Image Model selector show a model is real but not yet
+ * configured, instead of only discovering that at render time.
+ */
+export interface ReadinessProviders {
+  gemini: { configured: boolean };
+  nanoBanana: { configured: boolean };
+  nanoBananaPro: { configured: boolean };
+  chatgptImage: { configured: boolean };
+  veo: { configured: boolean };
+  email: { configured: boolean };
+}
+
+/**
+ * `GET /ready` returns 503 when the DB/asset-store checks fail, but its
+ * `providers` object is meaningful regardless of overall readiness (BUILD 19
+ * — provider configuration never affects overall `status`) — this reads the
+ * body directly rather than gating on `res.ok`.
+ */
+export async function getProviderConfiguration(): Promise<ReadinessProviders> {
+  const res = await apiFetch('/ready');
+  const body = (await res.json()) as { providers?: ReadinessProviders };
+  if (!body.providers) throw new Error('Malformed GET /ready response: missing providers.');
+  return body.providers;
+}
+
+/**
  * The wire response is plain JSON — branded fields (Timestamp, ProjectId)
  * don't survive serialization. Casting here, once, at the API boundary is
  * the deliberate place to bridge that; callers get back a real `Project`
@@ -176,7 +204,7 @@ export async function extractReferenceVisualLanguage(
 
 export interface RunGenerationParams {
   promptText: string;
-  renderCore: 'Nano Banana' | 'Google Flow' | 'ChatGPT Image' | 'Auto';
+  renderCore: 'Nano Banana' | 'Nano Banana Pro' | 'Google Flow' | 'ChatGPT Image' | 'Auto';
   aspectRatio: string;
   resolution: string;
   sourceAssetId: string;
@@ -240,7 +268,7 @@ export async function runEdit(projectId: string, generationId: string, params: R
 
 export interface RunViewParams {
   promptText: string;
-  renderCore: 'Nano Banana' | 'Google Flow' | 'ChatGPT Image' | 'Auto';
+  renderCore: 'Nano Banana' | 'Nano Banana Pro' | 'Google Flow' | 'ChatGPT Image' | 'Auto';
   aspectRatio: string;
   resolution: string;
   sourceAssetId: string;

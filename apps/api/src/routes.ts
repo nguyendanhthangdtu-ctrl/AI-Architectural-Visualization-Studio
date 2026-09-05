@@ -280,6 +280,7 @@ export async function handleExtractReference(
 
 const RENDER_CORE_SELECTION: Record<RunGenerationRequest['renderCore'], RenderCoreSelection> = {
   'Nano Banana': 'nano-banana',
+  'Nano Banana Pro': 'nano-banana-pro',
   'Google Flow': 'google-flow',
   'ChatGPT Image': 'chatgpt-image',
   Auto: 'auto',

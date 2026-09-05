@@ -44,6 +44,8 @@ export interface ReadinessResult {
   providers: {
     gemini: ProviderConfigurationCheck;
     nanoBanana: ProviderConfigurationCheck;
+    /** BUILD 27 — Nano Banana Pro (gemini-3-pro-image). */
+    nanoBananaPro: ProviderConfigurationCheck;
     chatgptImage: ProviderConfigurationCheck;
     veo: ProviderConfigurationCheck;
     /** BUILD 22 — real vendor (Resend) + credential both configured; `InMemoryEmailSender` (no real vendor) always reports `false` here. */
@@ -71,6 +73,7 @@ export async function checkReadiness(context: AppContext): Promise<ReadinessResu
     providers: {
       gemini: { configured: context.providerConfiguration.gemini },
       nanoBanana: { configured: context.providerConfiguration.nanoBanana },
+      nanoBananaPro: { configured: context.providerConfiguration.nanoBananaPro },
       chatgptImage: { configured: context.providerConfiguration.chatgptImage },
       veo: { configured: context.providerConfiguration.veo },
       email: { configured: context.providerConfiguration.email },

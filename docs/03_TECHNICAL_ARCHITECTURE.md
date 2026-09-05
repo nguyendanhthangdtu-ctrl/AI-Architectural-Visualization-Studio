@@ -1872,3 +1872,43 @@ existed and worked (BUILD 06-25); this gate found and fixed real gaps.
 - **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, unchanged from BUILD 24/25 — no live AI
   provider credential exists in this environment; nothing in this UX-focused gate changes that external
   dependency.
+
+## 41. BUILD 27 Nano Banana Pro (Multi-Model Image Engine v2) Record
+
+Full writeup: `docs/BUILD_27_NANO_BANANA_PRO.md`. Adds **Nano Banana Pro** (`gemini-3-pro-image`) as a
+third real, selectable AI Image Model alongside Nano Banana 2 (default, unchanged) and ChatGPT Image
+(unchanged). No provider/model removed, no render workflow change, no prior BUILD's UX changed.
+
+- **One adapter, two registered instances** (`nano-banana-adapter.ts`) — Nano Banana 2 and Nano Banana
+  Pro share the exact same Google Gemini Interactions API contract (confirmed against current docs); the
+  adapter factory gained optional `id`/`capabilities` overrides so a second instance
+  (`nano-banana-pro`, `model: 'gemini-3-pro-image'`) reports its own real id/capabilities while the
+  default (no-override) instance is byte-for-byte unchanged. Both read the same `NANO_BANANA_API_KEY`.
+- **Registry, schema, and selection-map extensions** — `SCENARIO_RENDER_CORES`, `renderCoreSchema`,
+  `RenderCoreSelection`, `RENDER_CORE_SELECTION`, and `IMAGE_MODEL_REGISTRY` each gained one new,
+  additive entry (`'Nano Banana Pro'` / `'nano-banana-pro'` / `gemini-3-pro-image`). Registry order (and
+  therefore the selector's order): Nano Banana 2 → Nano Banana Pro → ChatGPT Image → Auto.
+- **Real, current-docs-validated capabilities** — resolution `1K`/`2K`/`4K`; aspect ratio `1:1`/`3:2`/
+  `2:3`/`4:3`/`16:9`/`9:16`/`21:9` (every non-`Custom` value this app already offers). Nano Banana 2's own
+  narrower, already-validated aspect-ratio set is left untouched (CLAUDE.md rule 8). BUILD 26's existing
+  capability-aware `<option disabled>`/incompatible-selection-warning logic (`ScenarioSlots.tsx`) applies
+  automatically — no new client-side validation logic needed.
+- **New, informational "Not configured" model-selector annotation** — `GET /ready` gained a
+  `providers.nanoBananaPro` boolean; fetched once at app bootstrap (`App.tsx`, alongside the existing
+  `GET /auth/me` check, never blocking it) into `ProjectSessionState.providerConfiguration`. Deliberately
+  NOT a per-mount fetch inside `ScenarioSlots` itself, to avoid disturbing the many existing component
+  tests whose `fetch` mocks are keyed to call order rather than URL. The model stays fully selectable
+  either way; the real safety net (a real `PROVIDER_NOT_CONFIGURED` error, never a crash) was already
+  correct since BUILD 21.
+- **Mock Mode proven for all three models** (new `mock-e2e.test.ts` case) — `createMockImageAdapter()`
+  already accepted a `modelId` override (BUILD 25), so each render core (Nano Banana 2, Nano Banana Pro,
+  ChatGPT Image) independently reaches a real 201/succeeded output through the real HTTP pipeline, always
+  labeled `mock: true` / `'MOCK — NO REAL API CALL'` — never faking a live success. Zero network calls.
+- **Live Mode**: no live call made or required this gate; `live-provider-smoke.test.ts` gained an opt-in-
+  only Nano Banana Pro case, gated identically to the existing Nano Banana case (skipped unless
+  `RUN_LIVE_PROVIDER_SMOKE_TEST=true` and `NANO_BANANA_API_KEY` are both set).
+- **613/613 tests pass, 3 correctly skipped** (was 604/3 at the end of BUILD 26 — +9 new tests); typecheck,
+  lint, and production build all clean; built `apps/web` bundle re-grepped for every provider key/header
+  name — zero matches.
+- **Result: PRODUCTION CANDIDATE — EXTERNAL DEPENDENCY BLOCKED**, unchanged — no live Gemini/OpenAI
+  credential exists in this environment; this build does not claim PRODUCTION READY (CLAUDE.md rule 7).

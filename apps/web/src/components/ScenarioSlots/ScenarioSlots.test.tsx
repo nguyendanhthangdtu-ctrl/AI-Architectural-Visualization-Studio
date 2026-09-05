@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DomainError } from '@avs/shared';
 import { scenarioBuilder } from '@avs/ai-core';
 import { ProjectSessionProvider } from '../../state/ProjectSessionContext.js';
+import { ProjectSessionStore, createInitialProjectSessionState } from '../../state/project-session.js';
 import { ScenarioSlots } from './ScenarioSlots.js';
 
 function renderScenarioSlots() {
@@ -72,6 +73,41 @@ describe('ScenarioSlots', () => {
   it('BUILD 25: never offers Google Flow as a visible AI Image Model choice — its adapter is NOT_IMPLEMENTED', () => {
     renderScenarioSlots();
     expect(screen.queryByRole('option', { name: /Google Flow/i })).not.toBeInTheDocument();
+  });
+
+  it('BUILD 27: offers Nano Banana Pro as the second AI Image Model choice, after Nano Banana 2 and before ChatGPT Image', () => {
+    renderScenarioSlots();
+    const select = screen.getByLabelText('AI Image Model') as HTMLSelectElement;
+    const optionLabels = Array.from(select.options).map((o) => o.textContent);
+    expect(optionLabels).toEqual([
+      '—',
+      'Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)',
+      'Nano Banana Pro — Google Gemini (gemini-3-pro-image)',
+      'ChatGPT Image — openai (gpt-image-1)',
+      'Auto',
+    ]);
+  });
+
+  it('BUILD 27: shows "Not configured" next to a model whose credential GET /ready reported as absent, without disabling it', () => {
+    const store = new ProjectSessionStore({
+      ...createInitialProjectSessionState(),
+      providerConfiguration: {
+        gemini: { configured: true },
+        nanoBanana: { configured: true },
+        nanoBananaPro: { configured: true },
+        chatgptImage: { configured: false },
+        veo: { configured: false },
+        email: { configured: false },
+      },
+    });
+    render(
+      <ProjectSessionProvider store={store}>
+        <ScenarioSlots />
+      </ProjectSessionProvider>,
+    );
+    const option = screen.getByRole('option', { name: 'ChatGPT Image — openai (gpt-image-1) — Not configured' }) as HTMLOptionElement;
+    expect(option.disabled).toBe(false); // still selectable — never crashes, never turns a missing key into an uncontrolled UI failure
+    expect(screen.getByRole('option', { name: 'Nano Banana 2 — Google Gemini (gemini-3.1-flash-image)' })).toBeInTheDocument(); // configured model unaffected
   });
 
   it('renders Artificial Lighting as a multi-select checkbox group, not a single select', () => {

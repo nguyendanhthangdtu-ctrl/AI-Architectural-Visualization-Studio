@@ -158,6 +158,48 @@ describe.skipIf(!LIVE_SMOKE_TEST_ENABLED)('Live AI provider smoke test (BUILD 19
     }, 60_000);
   });
 
+  describe.skipIf(!process.env['NANO_BANANA_API_KEY'])('Image generation (Nano Banana Pro, BUILD 27)', () => {
+    it('submits a real generation request to gemini-3-pro-image and, on success, persists a retrievable output asset', async () => {
+      await startWithRealProviders();
+      const session = await registerTestUser(baseUrl);
+      const { projectId, assetId } = await createProjectWithUploadedAsset(session.cookie);
+      let outputAssetId: string | undefined;
+
+      try {
+        const generationRes = await fetch(`${baseUrl}/projects/${projectId}/generations`, withCookie({
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            promptText: 'A single red sphere on a white background',
+            renderCore: 'Nano Banana Pro',
+            aspectRatio: '1:1',
+            resolution: '1K',
+            sourceAssetId: assetId,
+            referenceAssetIds: [],
+            promptVersion: 'live-smoke-test:v1',
+            scenarioVersion: new Date().toISOString(),
+          }),
+        }, session.cookie));
+
+        expect([201, 422, 502]).toContain(generationRes.status);
+        const body = (await generationRes.json()) as Record<string, unknown>;
+        expect(JSON.stringify(body)).not.toContain(process.env['NANO_BANANA_API_KEY']);
+
+        if (generationRes.status === 201 && (body['status'] === 'succeeded' || body['status'] === undefined)) {
+          const outputAssets = body['outputAssets'] as { id: string; url: string }[] | undefined;
+          if (outputAssets && outputAssets.length > 0) {
+            outputAssetId = outputAssets[0]!.id;
+            const fetchRes = await fetch(`${baseUrl}${outputAssets[0]!.url}`, withCookie({}, session.cookie));
+            expect(fetchRes.status).toBe(200);
+          }
+        }
+      } finally {
+        await deleteAsset(session.cookie, projectId, assetId);
+        if (outputAssetId) await deleteAsset(session.cookie, projectId, outputAssetId);
+      }
+    }, 60_000);
+  });
+
   it('verifies real provider failure behavior — an unconfigured provider fails safely, without exposing internals', async () => {
     await startWithRealProviders();
     const session = await registerTestUser(baseUrl);

@@ -136,6 +136,32 @@ describe('createNanoBananaAdapter', () => {
     expect(result.outputAssetUrls).toEqual([]);
   });
 
+  it('BUILD 27: a config.model/id/capabilities override (Nano Banana Pro) reports its own id and capabilities, sends its own model id, without touching Nano Banana 2\'s defaults', async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ output_image: { data: 'aW1n', mime_type: 'image/jpeg' } }) });
+    const adapter = createNanoBananaAdapter({
+      apiKey: 'k',
+      model: 'gemini-3-pro-image',
+      id: 'nano-banana-pro',
+      capabilities: { maxResolution: '4K', supportedAspectRatios: ['1:1', '3:2', '2:3', '4:3', '16:9', '9:16', '21:9'] },
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    expect(adapter.id).toBe('nano-banana-pro');
+    expect(adapter.capabilities().supportedAspectRatios).toEqual(['1:1', '3:2', '2:3', '4:3', '16:9', '9:16', '21:9']);
+
+    const result = await adapter.generate(request);
+    const body = JSON.parse(fetchFn.mock.calls[0]![1].body);
+    expect(body.model).toBe('gemini-3-pro-image');
+    expect(result.usageMetadata['adapter']).toBe('nano-banana-pro');
+    expect(result.usageMetadata['model']).toBe('gemini-3-pro-image');
+
+    // The default (no override) instance is completely unaffected — Nano Banana 2's exact prior behavior.
+    const defaultAdapter = createNanoBananaAdapter({ apiKey: 'k' });
+    expect(defaultAdapter.id).toBe('nano-banana');
+    expect(defaultAdapter.capabilities().supportedAspectRatios).toEqual(['1:1', '16:9', '9:16']);
+    expect(defaultAdapter.capabilities().maxResolution).toBe('4K');
+  });
+
   it('rejects real, non-empty validation input as valid — never rejects a well-formed request', () => {
     const adapter = createNanoBananaAdapter({ apiKey: undefined });
     expect(adapter.validate(request)).toEqual({ valid: true, errors: [] });

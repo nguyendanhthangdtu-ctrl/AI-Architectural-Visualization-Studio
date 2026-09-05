@@ -33,6 +33,15 @@ export interface ImageModelDefinition {
   };
   /** False for a render core that exists in the schema but has no real, callable implementation yet (docs/03 §7 — e.g. Google Flow). Never offered as a user-facing choice while false. */
   enabled: boolean;
+  /**
+   * BUILD 27 — the key `AppContext.providerConfiguration` (apps/api) and
+   * `GET /ready`'s `providers` object use for THIS model's real credential
+   * presence. Two models can share a provider's credential (Nano Banana 2
+   * and Nano Banana Pro both read `NANO_BANANA_API_KEY`) while still each
+   * declaring their own `configKey`, since `GET /ready` reports each as its
+   * own boolean regardless of whether the underlying secret is shared.
+   */
+  configKey: 'nanoBanana' | 'nanoBananaPro' | 'chatgptImage' | 'googleFlow';
 }
 
 /**
@@ -67,6 +76,43 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelDefinition[] = [
       supportsImageEditing: true,
     },
     enabled: true,
+    configKey: 'nanoBanana',
+  },
+  {
+    // BUILD 27 — a real, distinct, premium Google Gemini image model (never
+    // a rename/alias of Nano Banana 2's gemini-3.1-flash-image), validated
+    // against current official documentation (accessed 2026-09-05):
+    // https://ai.google.dev/gemini-api/docs/gemini-3,
+    // https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-pro-image.
+    // Reuses the exact same Interactions API contract as Nano Banana 2
+    // (same endpoint, same request/response shape — only `model` and real
+    // capability ceilings differ), which is why `createNanoBananaAdapter()`
+    // (packages/model-adapters) is reused with a different `model`/`id`
+    // rather than a second adapter implementation.
+    id: 'gemini-3-pro-image',
+    renderCore: 'Nano Banana Pro',
+    provider: 'google-gemini',
+    displayName: 'Nano Banana Pro',
+    type: 'image-generation',
+    capabilities: {
+      // image_size per current docs: 1K/2K/4K (no 0.5K tier) — 'Preview'
+      // still maps to the real '1K' baseline via mapResolutionToImageSize(),
+      // which never emits '0.5K' for any model, so the app's full resolution
+      // vocabulary remains safe to offer here unmodified.
+      defaultResolution: 'Preview',
+      supportedResolutions: [...SCENARIO_RESOLUTIONS],
+      // aspect_ratio per current docs covers every non-'Custom' value this
+      // app already offers (1:1, 3:2, 2:3, 4:3, 16:9, 9:16, 21:9) — wider
+      // than Nano Banana 2's own, separately-validated, narrower set above.
+      // Nano Banana 2's set is deliberately left unchanged by this build
+      // (CLAUDE.md rule 8 — no reason to touch already-validated, working
+      // config outside this build's own mandate).
+      supportedAspectRatios: ['1:1', '3:2', '2:3', '4:3', '16:9', '9:16', '21:9'],
+      supportsReferenceImages: true,
+      supportsImageEditing: true,
+    },
+    enabled: true,
+    configKey: 'nanoBananaPro',
   },
   {
     id: 'gpt-image-1',
@@ -87,6 +133,7 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelDefinition[] = [
       supportsImageEditing: true,
     },
     enabled: true,
+    configKey: 'chatgptImage',
   },
   {
     id: 'google-flow',
@@ -106,6 +153,7 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelDefinition[] = [
     // render-core server-side, docs/03 §7) but never offered as a visible
     // choice — see getEnabledImageModels().
     enabled: false,
+    configKey: 'googleFlow',
   },
 ] as const;
 

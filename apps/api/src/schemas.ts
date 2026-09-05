@@ -82,8 +82,8 @@ export const runReferenceExtractionRequestSchema = z.object({
 
 export type RunReferenceExtractionRequest = z.infer<typeof runReferenceExtractionRequestSchema>;
 
-/** docs/07_SCENARIO_BUILDER_SPEC.md render-core vocabulary (BUILD 13) — the same Title Case values ScenarioSlots collects. */
-export const renderCoreSchema = z.enum(['Nano Banana', 'Google Flow', 'ChatGPT Image', 'Auto']);
+/** docs/07_SCENARIO_BUILDER_SPEC.md render-core vocabulary (BUILD 13; BUILD 27 added 'Nano Banana Pro') — the same Title Case values ScenarioSlots collects. */
+export const renderCoreSchema = z.enum(['Nano Banana', 'Nano Banana Pro', 'Google Flow', 'ChatGPT Image', 'Auto']);
 
 /** docs/11_IMAGE_GENERATION_SPEC.md step 1 "Validate request" (BUILD 13). */
 export const runGenerationRequestSchema = z.object({

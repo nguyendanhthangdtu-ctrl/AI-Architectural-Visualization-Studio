@@ -10,7 +10,7 @@ import type {
   StructuredIntelligence,
 } from '@avs/ai-core';
 import type { CanonicalMasterPrompt, PromptOutput } from '@avs/prompt-engine';
-import type { AuthenticatedUser } from '../api/client.js';
+import type { AuthenticatedUser, ReadinessProviders } from '../api/client.js';
 
 /**
  * Client-side ProjectSession state — docs/03_TECHNICAL_ARCHITECTURE.md §7
@@ -49,6 +49,8 @@ export interface ProjectSessionState {
   /** RELEASE 02 — the real, server-confirmed signed-in user (never a client-invented identity); `null` until `authStatus` is `'signedIn'`. */
   currentUser: AuthenticatedUser | null;
   authStatus: AuthStatus;
+  /** BUILD 27 — `GET /ready`'s provider booleans, fetched once at app bootstrap alongside `GET /auth/me`; `null` until that fetch resolves (or if it fails — never blocks or breaks the app). Purely informational for the AI Image Model selector; the real, authoritative failure path stays the existing `PROVIDER_NOT_CONFIGURED` render-time error. */
+  providerConfiguration: ReadinessProviders | null;
   /**
    * Three independent language settings (Architecture Amendment) — UI
    * language is client-only; AI analysis / prompt output languages are
@@ -101,6 +103,7 @@ export function createInitialProjectSessionState(): ProjectSessionState {
   return {
     currentUser: null,
     authStatus: 'checking',
+    providerConfiguration: null,
     language: DEFAULT_LANGUAGE_CONFIG,
     currentProject: null,
     projectDNA: null,

@@ -39,6 +39,16 @@ import type {
  * `packages/ai-core/src/image-model-registry.ts` as the app's default image
  * model.
  *
+ * BUILD 27 (+ Nano Banana Pro) — Nano Banana Pro (`gemini-3-pro-image`) is
+ * the SAME Interactions API contract, real provider docs confirmed (endpoint,
+ * request/response shape) — only the model id and real capability ceilings
+ * differ. Rather than a second adapter implementation, `config.model` (already
+ * present) selects the model, and the new optional `config.id`/
+ * `config.capabilities` let one Nano Banana Pro *instance* of this same
+ * factory report its own real `id` and `capabilities()` distinctly from the
+ * Nano Banana 2 instance — both defaulting to today's exact Nano Banana 2
+ * values when omitted, so every existing call site/test is unaffected.
+ *
  * IMPORTANT: no NANO_BANANA_API_KEY was available at implementation time —
  * this has been validated against current documentation but NOT exercised
  * against the real API. Treat live behavior as unverified until a key is
@@ -67,6 +77,13 @@ function mapResolutionToImageSize(resolution: string): '0.5K' | '1K' | '2K' | '4
 export interface NanoBananaAdapterConfig {
   apiKey: string | undefined;
   model?: string;
+  /** BUILD 27 — lets a second registered render core (e.g. Nano Banana Pro) built on this same factory report its own real adapter id instead of the default `'nano-banana'`. */
+  id?: string;
+  /** BUILD 27 — real, distinct capability ceilings for a non-default model instance (e.g. Nano Banana Pro's wider aspect-ratio set); omitted fields fall back to Nano Banana 2's own already-validated defaults. */
+  capabilities?: {
+    maxResolution?: string;
+    supportedAspectRatios?: string[];
+  };
   /** Injectable for testing — defaults to the global fetch. */
   fetchFn?: typeof fetch;
   /** BUILD 23 — real, bounded request timeout; defaults to the shared `DEFAULT_PROVIDER_TIMEOUT_MS` every other adapter already uses. */
@@ -117,6 +134,7 @@ function toImagePart(img: { data: Uint8Array; contentType: string }) {
 export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageGenerationAdapter {
   const fetchFn = config.fetchFn ?? fetch;
   const model = config.model ?? DEFAULT_MODEL;
+  const id = config.id ?? 'nano-banana';
   const timeoutMs = config.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
   const maxAttempts = config.maxAttempts ?? 2;
   const retryBackoffMs = config.retryBackoffMs ?? 300;
@@ -172,7 +190,7 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
           return {
             status: 'failed' as const,
             outputAssetUrls: [],
-            usageMetadata: { adapter: 'nano-banana', model, note: 'No output_image in response.' },
+            usageMetadata: { adapter: id, model, note: 'No output_image in response.' },
           };
         }
 
@@ -183,7 +201,7 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
           // permanent app URL is BUILD 13's job (Image Generation Pipeline); this is the
           // real provider output, immediately decodable, not a placeholder.
           outputAssetUrls: [`data:${mimeType};base64,${responseJson.output_image.data}`],
-          usageMetadata: { adapter: 'nano-banana', model, requestId },
+          usageMetadata: { adapter: id, model, requestId },
           ...(responseJson.id ? { providerJobId: responseJson.id } : {}),
         };
       },
@@ -192,13 +210,14 @@ export function createNanoBananaAdapter(config: NanoBananaAdapterConfig): ImageG
   }
 
   return {
-    id: 'nano-banana',
+    id,
 
     capabilities(): AdapterCapabilities {
       return {
         // BUILD 25 — Nano Banana 2's real, documented image_size ceiling (see mapResolutionToImageSize() above).
-        maxResolution: '4K',
-        supportedAspectRatios: ['1:1', '16:9', '9:16'],
+        // BUILD 27 — overridable per-instance (e.g. Nano Banana Pro's own, wider, separately-validated set).
+        maxResolution: config.capabilities?.maxResolution ?? '4K',
+        supportedAspectRatios: config.capabilities?.supportedAspectRatios ?? ['1:1', '16:9', '9:16'],
         // Multimodal input (source/reference images + text) in one call is genuinely edit-like for this model family —
         // see edit()'s doc comment for the real limitation (no true pixel mask, unlike ChatGPTImageAdapter).
         supportsEdit: true,

@@ -196,6 +196,68 @@ describe('Mock E2E — Nano Banana 2 (BUILD 25 Part 14-G)', () => {
     expect(forbiddenRes.status).toBe(404);
   });
 
+  it('BUILD 27: Mock Mode supports all three real AI Image Models (Nano Banana 2, Nano Banana Pro, ChatGPT Image), each reaching a real, honestly-labeled mock READY output through its own real render-core key', async () => {
+    const context = createAppContext({ registrationSecret: TEST_REGISTRATION_SECRET });
+    context.visionAnalysisEngine = { analyze: vi.fn().mockResolvedValue(FAKE_STRUCTURED_INTELLIGENCE) } as unknown as VisionAnalysisEngine;
+    context.imageGenerationService = new ImageGenerationService({
+      'nano-banana': createMockImageAdapter({ modelId: 'gemini-3.1-flash-image' }),
+      'nano-banana-pro': createMockImageAdapter({ modelId: 'gemini-3-pro-image' }),
+      'chatgpt-image': createMockImageAdapter({ modelId: 'gpt-image-1' }),
+    });
+    context.aiQcEngine = { evaluate: vi.fn().mockResolvedValue(PERFECT_QC_RESULT) } as unknown as AiQc;
+    await start(context);
+    const session: TestSession = await registerTestUser(baseUrl);
+
+    const createRes = await fetch(`${baseUrl}/projects`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Mock E2E Multi-Model', module: 'architecture' }),
+    }, session.cookie));
+    const project = (await createRes.json()) as { id: string };
+
+    const uploadRes = await fetch(`${baseUrl}/projects/${project.id}/assets`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: ONE_PIXEL_PNG,
+    }, session.cookie));
+    const sourceAsset = (await uploadRes.json()) as { id: string };
+
+    const cases: ['Nano Banana' | 'Nano Banana Pro' | 'ChatGPT Image', string][] = [
+      ['Nano Banana', 'gemini-3.1-flash-image'],
+      ['Nano Banana Pro', 'gemini-3-pro-image'],
+      ['ChatGPT Image', 'gpt-image-1'],
+    ];
+
+    for (const [renderCore, expectedModelId] of cases) {
+      const genRes = await fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          promptText: 'A photorealistic architectural photograph, preserving the original architecture and camera.',
+          renderCore,
+          aspectRatio: '16:9',
+          resolution: '2K',
+          sourceAssetId: sourceAsset.id,
+          referenceAssetIds: [],
+          promptVersion: 'prompt-compiler:v1',
+          scenarioVersion: '2026-09-05T00:00:00.000Z',
+        }),
+      }, session.cookie));
+
+      expect(genRes.status, `renderCore "${renderCore}"`).toBe(201);
+      const generation = (await genRes.json()) as {
+        outputAssetUrls: string[];
+        generation: { status: string; usageMetadata: Record<string, unknown> };
+      };
+      expect(generation.generation.status).toBe('succeeded');
+      expect(generation.generation.usageMetadata['model']).toBe(expectedModelId);
+      // Never indistinguishable from a real generation — the same honest labeling BUILD 25 established.
+      expect(generation.generation.usageMetadata['mock']).toBe(true);
+      expect(generation.generation.usageMetadata['note']).toBe('MOCK — NO REAL API CALL');
+      expect(generation.outputAssetUrls).toHaveLength(1);
+    }
+  });
+
   it('never calls an external provider host — only this test\'s own local loopback server', async () => {
     const externalUrls: string[] = [];
     const realFetch = globalThis.fetch;

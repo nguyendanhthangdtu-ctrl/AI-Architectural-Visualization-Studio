@@ -42,6 +42,7 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
       providers: {
         gemini: { configured: boolean };
         nanoBanana: { configured: boolean };
+        nanoBananaPro: { configured: boolean };
         chatgptImage: { configured: boolean };
         veo: { configured: boolean };
         email: { configured: boolean };
@@ -49,11 +50,22 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
     };
     expect(body.providers.gemini.configured).toBe(true);
     expect(body.providers.nanoBanana.configured).toBe(false);
+    expect(body.providers.nanoBananaPro.configured).toBe(false);
     expect(body.providers.chatgptImage.configured).toBe(false);
     expect(body.providers.veo.configured).toBe(false);
     expect(body.providers.email.configured).toBe(false); // no EMAIL_PROVIDER set — InMemoryEmailSender, never "configured"
     // no provider being unconfigured ever flips overall readiness — this deployment can still serve auth/asset/DB traffic
     expect(body.status).toBe('ready');
+  });
+
+  it('BUILD 27: reports Nano Banana Pro as configured whenever the shared NANO_BANANA_API_KEY credential is set', async () => {
+    server = createApp(createAppContext({ nanoBananaApiKey: 'a-real-nano-banana-key' }));
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/ready`);
+    const body = (await res.json()) as { providers: { nanoBanana: { configured: boolean }; nanoBananaPro: { configured: boolean } } };
+    expect(body.providers.nanoBanana.configured).toBe(true);
+    expect(body.providers.nanoBananaPro.configured).toBe(true);
   });
 
   it('BUILD 22: reports email as configured only when a real vendor AND its credential are both set', async () => {
