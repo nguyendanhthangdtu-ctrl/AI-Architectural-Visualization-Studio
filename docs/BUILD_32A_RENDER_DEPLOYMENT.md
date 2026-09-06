@@ -1,5 +1,12 @@
 # BUILD 32A — Render Free Hosting Deployment
 
+> **Superseded — see `docs/BUILD_32B_RENDER_FRONTEND.md` instead.** The two-service
+> architecture below (a separate Static Site for the frontend) breaks this app's
+> `SameSite=Strict` session cookie once actually deployed to two different `onrender.com`
+> subdomains (they're different "sites" under the Public Suffix List). BUILD 32B corrects
+> this to one same-origin service. This doc is kept as a historical record of what was
+> tried, not a live instruction set — follow BUILD 32B's doc for the working setup.
+
 For whoever creates the actual Render services — this repo has no Render account access
 of its own, so every step below that touches Render's dashboard/API must be done by a
 human with that account. This doc gives the exact values; nothing here is a guess about

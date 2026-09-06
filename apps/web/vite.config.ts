@@ -15,7 +15,9 @@ const pkg = (name: string) => fileURLToPath(new URL(`../../packages/${name}/src/
 // own real path prefixes are proxied — never a catch-all — so this app's own
 // client-side routes (/architecture, /interior) are never shadowed.
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] ?? 'http://localhost:8080';
-const PROXIED_API_PATHS = ['/projects', '/assets', '/auth', '/health', '/metrics'];
+// BUILD 32B — added '/ready' (apps/api/src/readiness.ts), missing here since
+// before this build nothing in dev needed to reach it through this proxy.
+const PROXIED_API_PATHS = ['/projects', '/assets', '/auth', '/health', '/metrics', '/ready'];
 
 export default defineConfig({
   plugins: [react()],
@@ -33,5 +35,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    // BUILD 32B (Frontend Production Deployment) — Vite's own default output
+    // subdirectory is 'assets', which would collide with apps/api's real
+    // `/assets/:id` route (real user-uploaded/generated images) once the
+    // built frontend is served same-origin from apps/api
+    // (apps/api/src/static-assets.ts) — a request for this app's own JS/CSS
+    // bundle would otherwise be routed to the (auth-protected) asset-store
+    // handler instead of the static file. Renamed to a name that can never
+    // collide with any real apps/api route prefix.
+    assetsDir: 'static',
   },
 });

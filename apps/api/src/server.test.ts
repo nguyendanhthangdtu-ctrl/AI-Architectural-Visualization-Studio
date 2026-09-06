@@ -1,4 +1,7 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './server.js';
 import { createAppContext } from './app-context.js';
@@ -67,5 +70,60 @@ describe('apps/api bootstrap server', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ code: 'NOT_FOUND', retryable: false });
     expect(Object.keys(body)).not.toContain('stack');
+  });
+});
+
+describe('apps/api same-origin frontend serving (BUILD 32B, opt-in via webDistDir)', () => {
+  let server: ReturnType<typeof createApp> | undefined;
+  let webDistDir: string;
+
+  beforeEach(() => {
+    webDistDir = mkdtempSync(join(tmpdir(), 'avs-web-dist-test-'));
+    writeFileSync(join(webDistDir, 'index.html'), '<html>SPA shell</html>');
+  });
+
+  afterEach(() => {
+    server?.close();
+    rmSync(webDistDir, { recursive: true, force: true });
+  });
+
+  it('does NOT serve the frontend when webDistDir is not passed — exact prior behavior for every existing caller', async () => {
+    server = createApp();
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/architecture`);
+    expect(res.status).toBe(401); // falls through to requireAuth exactly as before, never the static handler
+  });
+
+  it('serves the frontend shell for a client-side route once webDistDir is passed', async () => {
+    server = createApp(createAppContext(), undefined, undefined, undefined, webDistDir);
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/architecture`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('<html>SPA shell</html>');
+  });
+
+  it('still routes real API paths correctly, never shadowed by the static frontend handler', async () => {
+    server = createApp(createAppContext(), undefined, undefined, undefined, webDistDir);
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+
+    const health = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(health.status).toBe(200);
+    await expect(health.json()).resolves.toEqual({ status: 'ok' });
+
+    const ready = await fetch(`http://127.0.0.1:${port}/ready`);
+    expect(ready.status).toBe(200);
+  });
+
+  it('still requires auth for a real protected API route, never serving the SPA shell instead', async () => {
+    server = createApp(createAppContext(), undefined, undefined, undefined, webDistDir);
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/projects`, { method: 'POST' });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ code: 'UNAUTHENTICATED' }); // a real API error envelope, not the SPA HTML shell
   });
 });

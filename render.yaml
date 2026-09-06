@@ -1,26 +1,28 @@
-# BUILD 32A (Render Free Hosting Deployment) — best-effort Render Blueprint.
+# BUILD 32B (Frontend Production Deployment & API Connection) — best-effort
+# Render Blueprint. NOT validated against a real Render account (no Render
+# access exists in the environment this was authored in) — Render's "New
+# Blueprint" flow will show a clear validation error if any field name has
+# drifted from Render's current schema. If it doesn't apply cleanly, update
+# your existing service's dashboard settings manually instead — see
+# docs/BUILD_32B_RENDER_FRONTEND.md for the exact same values written out
+# as manual steps (the reliable, guaranteed-current path), including how to
+# update the service that's already live rather than creating a new one.
 #
-# NOT validated against a real Render account (no Render access exists in
-# the environment this was authored in) — Render's "New Blueprint" flow
-# will show a clear validation error if any field name here has drifted
-# from Render's current schema. If it doesn't apply cleanly, create the
-# two services manually in the Render dashboard instead — see
-# docs/BUILD_32A_RENDER_DEPLOYMENT.md for the exact same values written
-# out as manual dashboard steps (the reliable, guaranteed-current path).
+# CORRECTED from BUILD 32A: ONE service, not two. apps/web is now built and
+# served SAME-ORIGIN from apps/api itself (apps/api/src/static-assets.ts) —
+# not a separate Render Static Site. This isn't a style choice: the session
+# cookie is `SameSite=Strict` (apps/api/src/auth/session.ts), and Render
+# deliberately lists `onrender.com` in the Public Suffix List (the same
+# reason `github.io`/`vercel.app` are listed) — two different
+# `*.onrender.com` subdomains are different "sites" under that list, so a
+# browser would never send that cookie between them. A single service is
+# the only free-tier-only way (no custom domain) to keep auth working.
 #
-# Two free services, mirroring this repo's own existing two-part
-# architecture (a JSON-only API with no static-file-serving code, and a
-# separately-built SPA that already externalizes its API origin via
-# VITE_API_BASE_URL) — never merged into one process, since doing so would
-# require adding real new static-file-serving/SPA-fallback code to
-# apps/api that does not exist today (CLAUDE.md rule 8 "no rewrite without
-# a documented reason"). Both are genuinely free on Render: the static
-# site never spins down; the web service spins down after 15 minutes idle
-# (expected free-tier behavior, not a defect — see the BUILD 32A report).
+# Genuinely free: one Render Web Service, no paid disk/DB/worker/queue.
 
 services:
   - type: web
-    name: avs-api
+    name: ai-architectural-visualization-studio
     runtime: node
     plan: free
     region: oregon
@@ -32,14 +34,17 @@ services:
       - key: NODE_VERSION
         value: 22.5.0
       # Render injects PORT itself — parseServerEnv() already falls back to
-      # it (see packages/shared/src/env.ts), nothing to set here for that.
+      # it (packages/shared/src/env.ts), nothing to set here for that.
+      - key: WEB_DIST_DIR
+        value: apps/web/dist # serves the built frontend same-origin — see static-assets.ts
       #
       # Every value below is a real secret or deployment-specific value —
       # `sync: false` means Render will prompt for it once in the
-      # dashboard and never store/sync it through this file. Never fill
-      # in a real value here.
+      # dashboard and never store/sync it through this file. Never fill in
+      # a real value here, and never paste one into a chat with any AI
+      # assistant, including this one.
       - key: DATABASE_URL
-        sync: false # e.g. /opt/render/project/data/avs.sqlite3 — see the storage-persistence note in the BUILD 32A report before relying on this path surviving a redeploy
+        sync: false # e.g. /opt/render/project/data/avs.sqlite3 — ephemeral on Render Free unless a paid persistent disk is attached; see the BUILD 32B report
       - key: ASSET_STORE_URL
         sync: false # e.g. /opt/render/project/data/assets — same ephemeral-storage caveat
       - key: REGISTRATION_SECRET
@@ -47,23 +52,12 @@ services:
       - key: ASSET_URL_SIGNING_SECRET
         sync: false
       - key: ALLOWED_ORIGINS
-        sync: false # set to the avs-web static site's URL once it exists — see docs/BUILD_32A_RENDER_DEPLOYMENT.md
+        sync: false # same-origin deployment doesn't need this for the frontend itself; only set it if a genuinely different origin also needs to call this API
       - key: TRUST_HTTPS
         value: 'true' # Render terminates TLS in front of this service
       - key: GEMINI_API_KEY
-        sync: false # optional — leave unset to keep Vision Analysis/QC PROVIDER_NOT_CONFIGURED; BUILD 29 quota remains blocked regardless
+        sync: false # optional — BUILD 29's quota remains blocked regardless of whether this is set
       - key: NANO_BANANA_API_KEY
-        sync: false # optional — see BUILD 29/32 reports; do not set just to satisfy this deployment
+        sync: false # optional
       - key: CHATGPT_IMAGE_API_KEY
         sync: false # optional
-
-  - type: web
-    name: avs-web
-    runtime: static
-    plan: free
-    branch: main
-    buildCommand: npm ci && npm run build --workspace=@avs/web
-    staticPublishPath: apps/web/dist
-    envVars:
-      - key: VITE_API_BASE_URL
-        sync: false # set to the avs-api service's URL once it exists (e.g. https://avs-api.onrender.com)

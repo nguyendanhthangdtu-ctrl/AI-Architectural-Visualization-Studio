@@ -60,6 +60,16 @@ const serverEnvSchema = z.object({
   // the Vite dev server's own origin when unset (cors.ts).
   ALLOWED_ORIGINS: z.string().optional(),
 
+  // BUILD 32B (Frontend Production Deployment) — a real, built apps/web/dist
+  // directory to serve same-origin from this same process (see
+  // apps/api/src/static-assets.ts's own doc comment for why same-origin is
+  // required, not optional, for the SameSite=Strict session cookie to ever
+  // reach this server on a real deployment). Unset (the default, and every
+  // local-dev/test run): this server stays API-only, exactly as before —
+  // the frontend is served separately (Vite dev server locally; nothing in
+  // production until this is set).
+  WEB_DIST_DIR: z.string().optional(),
+
   // Signs the time-limited asset URLs `GET /assets/:id` can require (BUILD
   // 18) — docs/03 §9 "signed, time-limited URLs from AssetStore — no public
   // bucket by default." Optional so local dev/tests never need a secret to

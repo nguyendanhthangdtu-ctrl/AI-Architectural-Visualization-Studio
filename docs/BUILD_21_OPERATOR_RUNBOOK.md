@@ -23,7 +23,8 @@ holds — an empty environment starts cleanly). What each one unlocks:
 | `REGISTRATION_SECRET` | Enables `POST /auth/register` | Registration is disabled entirely (deny-by-default) |
 | `TRUST_HTTPS` | `true`/`false` — gates cookie `Secure` + HSTS | Defaults `false`; **setting `true` without `ASSET_URL_SIGNING_SECRET` refuses to start** (BUILD 19 fail-fast rule) |
 | `TRUST_PROXY` | `true`/`false` — trust `X-Forwarded-For` for IP-keyed rate limiting (BUILD 32) | Defaults `false`; set `true` only once a real reverse proxy always sets that header itself, else every client behind the proxy shares one rate-limit bucket |
-| `API_PORT` | Listen port | Defaults `8080` |
+| `API_PORT` | Listen port (falls back to the platform-injected `PORT` if unset, BUILD 32A) | Defaults `8080` |
+| `WEB_DIST_DIR` | Serves the built frontend same-origin from this process (BUILD 32B — see `docs/BUILD_32B_RENDER_FRONTEND.md`), e.g. `apps/web/dist` | This server stays API-only; nothing serves the frontend in production |
 | `RUN_LIVE_PROVIDER_SMOKE_TEST` | Opt-in live provider test (see §7) | Live suite skips |
 | `EMAIL_PROVIDER` | `resend` — real email vendor (BUILD 22) | Unset = `InMemoryEmailSender`, never delivers |
 | `EMAIL_FROM` | Required when `EMAIL_PROVIDER=resend` | Server refuses to start without it (fail-fast) |

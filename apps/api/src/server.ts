@@ -6,6 +6,7 @@ import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
 import { applySecurityHeaders } from './security-headers.js';
 import { handleReadiness } from './readiness.js';
 import { enforceRateLimit, resolveClientIp } from './rate-limit-middleware.js';
+import { serveStaticAsset } from './static-assets.js';
 import { createAppContext, type AppContext } from './app-context.js';
 import {
   handleConfirmPasswordReset,
@@ -47,6 +48,16 @@ const PROJECT_VIDEO_ID_ROUTE = /^\/projects\/([^/]+)\/videos\/([^/]+)$/;
 const PROJECT_ASSET_ID_ROUTE = /^\/projects\/([^/]+)\/assets\/([^/]+)$/;
 const ASSET_ID_ROUTE = /^\/assets\/([^/]+)$/;
 
+// BUILD 32B — every real top-level API path prefix this server ever
+// handles, kept in sync by hand with apps/web/vite.config.ts's own
+// `PROXIED_API_PATHS` (that list is dev-proxy-only and predates `/ready`;
+// this one is the complete, authoritative set used to decide "is this an
+// API request or a frontend route" for static-asset fallback below).
+const API_PATH_PREFIXES = ['/projects', '/assets', '/auth', '/health', '/metrics', '/ready'];
+function isApiPath(path: string): boolean {
+  return API_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
 /**
  * apps/api HTTP server — docs/03 §8. Routes land here as the Build Gate that
  * owns each capability builds it.
@@ -62,6 +73,16 @@ export function createApp(
   logger = createConsoleLogger(),
   allowedOrigins: readonly string[] = parseAllowedOrigins(undefined),
   metrics = createInMemoryMetrics(),
+  /**
+   * BUILD 32B — the built frontend directory (`apps/web/dist`) to serve
+   * same-origin; see static-assets.ts's own doc comment for why this is
+   * required, not optional, once a real cookie-authenticated deployment
+   * exists. `undefined` (every existing call site, every existing test)
+   * keeps the exact prior behavior: an unmatched GET falls through to
+   * `requireAuth()` exactly as before — this parameter changes nothing
+   * unless a caller explicitly opts in.
+   */
+  webDistDir: string | undefined = undefined,
 ) {
   return createServer((req, res) => {
     applyCorsHeaders(req, res, allowedOrigins);
@@ -137,6 +158,17 @@ export function createApp(
         if (req.method === 'POST' && path === '/auth/password-reset/confirm') {
           enforceRateLimit(context.passwordResetRateLimiter, resolveClientIp(req, context.trustProxy));
           await handleConfirmPasswordReset(req, res, context);
+          return;
+        }
+
+        // BUILD 32B — the built frontend, served same-origin (static-assets.ts's
+        // own doc comment has the full reasoning). Must stay ahead of
+        // requireAuth() below: a signed-out visitor has to be able to load the
+        // app's HTML/JS at all before they can ever sign in. Never active
+        // unless `webDistDir` was explicitly passed to createApp() — every
+        // existing test/context leaves this branch dead code.
+        if (req.method === 'GET' && webDistDir && !isApiPath(path)) {
+          serveStaticAsset(res, webDistDir, path);
           return;
         }
 
@@ -294,9 +326,13 @@ if (isMainModule) {
     });
   }
 
-  const httpServer = createApp(context, logger, parseAllowedOrigins(env.ALLOWED_ORIGINS)).listen(env.API_PORT, () => {
-    logger.info(`apps/api listening on :${env.API_PORT}`);
-  });
+  const httpServer = createApp(context, logger, parseAllowedOrigins(env.ALLOWED_ORIGINS), createInMemoryMetrics(), env.WEB_DIST_DIR).listen(
+    env.API_PORT,
+    () => {
+      logger.info(`apps/api listening on :${env.API_PORT}`);
+      if (env.WEB_DIST_DIR) logger.info(`Serving frontend same-origin from ${env.WEB_DIST_DIR}`);
+    },
+  );
 
   // BUILD 32 (Production Deployment) — graceful shutdown: stop accepting new
   // connections, let in-flight requests finish, then release the DB handle.
