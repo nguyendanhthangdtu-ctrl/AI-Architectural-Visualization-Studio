@@ -32,7 +32,13 @@ describe('apps/api security hardening (RELEASE 02)', () => {
       expect(res.headers.get('x-content-type-options')).toBe('nosniff');
       expect(res.headers.get('x-frame-options')).toBe('DENY');
       expect(res.headers.get('referrer-policy')).toBe('no-referrer');
-      expect(res.headers.get('content-security-policy')).toBe("default-src 'none'");
+      // BUILD 32B HOTFIX — 'self', not 'none': apps/api now optionally serves
+      // the frontend same-origin (static-assets.ts); 'none' blocked the
+      // frontend's own same-origin script/style execution and fetch() calls
+      // (a real production defect — a blank white page in the browser
+      // despite GET / itself returning 200). 'self' stays maximally
+      // restrictive for a deployment with zero third-party origins.
+      expect(res.headers.get('content-security-policy')).toBe("default-src 'self'");
       expect(res.headers.get('strict-transport-security')).toBeNull();
     });
 
