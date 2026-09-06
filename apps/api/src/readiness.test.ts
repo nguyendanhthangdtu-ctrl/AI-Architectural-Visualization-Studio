@@ -25,6 +25,14 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
     expect(res.status).toBe(200);
   });
 
+  it('BUILD 32A HOTFIX: responds 200 to HEAD /ready too, never 401 — same fix as GET /health/HEAD /health (server.test.ts)', async () => {
+    server = createApp(createAppContext());
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/ready`, { method: 'HEAD' });
+    expect(res.status).toBe(200);
+  });
+
   it('reports database and assetStore both ok for a real, working context', async () => {
     server = createApp(createAppContext());
     await new Promise<void>((resolve) => server!.listen(0, resolve));

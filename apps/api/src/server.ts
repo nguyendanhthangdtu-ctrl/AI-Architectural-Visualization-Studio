@@ -82,7 +82,22 @@ export function createApp(
         const url = new URL(req.url ?? '/', 'http://internal');
         const path = url.pathname;
 
-        if (req.method === 'GET' && path === '/health') {
+        // BUILD 32A HOTFIX — a real defect found via a live Render deployment:
+        // infrastructure health checkers (Render's own included) commonly send
+        // HEAD rather than GET for a lightweight liveness/readiness probe (no
+        // response body needed to confirm the service is up). These routes
+        // only ever matched `req.method === 'GET'`, so a HEAD request fell
+        // through every public-route check below and reached `requireAuth()`,
+        // producing the exact reported `401 UNAUTHENTICATED — "Sign in
+        // required."` on an endpoint that must never require a session.
+        // HEAD is a safe, idempotent, read-only variant of GET (HTTP spec) —
+        // accepting it here doesn't weaken anything; sending the same JSON
+        // body back on a HEAD response is harmless (a health-checker reads
+        // only the status code) and keeps this fix a one-line widening of an
+        // existing check rather than new body-suppression logic.
+        const isHealthCheckMethod = req.method === 'GET' || req.method === 'HEAD';
+
+        if (isHealthCheckMethod && path === '/health') {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ status: 'ok' }));
           return;
@@ -94,7 +109,7 @@ export function createApp(
           return;
         }
 
-        if (req.method === 'GET' && path === '/ready') {
+        if (isHealthCheckMethod && path === '/ready') {
           await handleReadiness(res, context);
           return;
         }

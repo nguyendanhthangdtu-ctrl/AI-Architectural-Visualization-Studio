@@ -20,6 +20,14 @@ describe('apps/api bootstrap server', () => {
     await expect(res.json()).resolves.toEqual({ status: 'ok' });
   });
 
+  it('BUILD 32A HOTFIX: responds 200 to HEAD /health, never 401 — real defect found via a live Render deployment (its health checker sends HEAD, which previously fell through to requireAuth())', async () => {
+    server = createApp();
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'HEAD' });
+    expect(res.status).toBe(200);
+  });
+
   /**
    * RELEASE 02 — `requireAuth()` runs before route matching for every
    * non-public path, so an unauthenticated request to a route that doesn't
@@ -27,6 +35,14 @@ describe('apps/api bootstrap server', () => {
    * never be able to enumerate which routes exist by comparing 401 vs 404.
    * A signed-in caller still gets a real 404 for an unknown route.
    */
+  it('BUILD 32A HOTFIX: a HEAD request to any OTHER route still requires auth — the /health,/ready HEAD fix is scoped to exactly those two routes', async () => {
+    server = createApp();
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/projects`, { method: 'HEAD' });
+    expect(res.status).toBe(401);
+  });
+
   it('rejects an unauthenticated request to an unknown route with 401, not a route-existence-revealing 404', async () => {
     server = createApp();
     await new Promise<void>((resolve) => server!.listen(0, resolve));
