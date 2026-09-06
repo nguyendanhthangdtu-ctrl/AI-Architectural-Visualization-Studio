@@ -13,6 +13,14 @@ import { z } from 'zod';
  * client-side code (CLAUDE.md rule 6, docs/16 "server-side provider calls").
  */
 const serverEnvSchema = z.object({
+  // BUILD 32A (Render Free deployment) — `API_PORT` is this app's own name
+  // (predates any specific host); most PaaS platforms, Render included,
+  // instead inject a `PORT` env var and require the process to listen on
+  // exactly that port for their health check/routing to reach it at all.
+  // `parseServerEnv()` below folds `PORT` in as a fallback source for this
+  // field before validation — this field itself stays named `API_PORT`
+  // everywhere else in the app (docs/config/tests unchanged); an explicit
+  // `API_PORT` always wins if somehow both are set.
   API_PORT: z.coerce.number().int().positive().default(8080),
 
   // Model-provider credentials (docs/10). BUILD 12: NanoBananaAdapter and
@@ -187,7 +195,11 @@ const publicEnvSchema = z.object({});
 export type PublicEnv = z.infer<typeof publicEnvSchema>;
 
 export function parseServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {
-  const result = serverEnvSchema.safeParse(source);
+  // BUILD 32A — see API_PORT's own doc comment above: fold the
+  // platform-injected `PORT` in as a fallback source, never overriding an
+  // explicitly-set `API_PORT`.
+  const normalizedSource = { ...source, API_PORT: source.API_PORT ?? source.PORT };
+  const result = serverEnvSchema.safeParse(normalizedSource);
   if (!result.success) {
     throw new Error(`Invalid server environment configuration: ${result.error.message}`);
   }

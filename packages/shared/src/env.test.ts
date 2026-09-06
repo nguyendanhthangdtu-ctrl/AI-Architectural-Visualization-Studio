@@ -17,6 +17,14 @@ describe('parseServerEnv', () => {
     expect(() => parseServerEnv({ API_PORT: 'not-a-port' })).toThrow();
   });
 
+  it('BUILD 32A: falls back to the platform-injected PORT when API_PORT is unset (Render and most PaaS platforms only ever set PORT)', () => {
+    expect(parseServerEnv({ PORT: '10000' }).API_PORT).toBe(10000);
+  });
+
+  it('BUILD 32A: an explicit API_PORT always wins over PORT when both are somehow set', () => {
+    expect(parseServerEnv({ API_PORT: '3000', PORT: '10000' }).API_PORT).toBe(3000);
+  });
+
   it('lists every credential field as a secret to redact from logs', () => {
     expect(SECRET_ENV_KEYS).toEqual(
       expect.arrayContaining([
