@@ -1,5 +1,3 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createConsoleLogger, createInMemoryMetrics, DomainError, parseServerEnv } from '@avs/shared';
@@ -8,7 +6,7 @@ import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
 import { applySecurityHeaders } from './security-headers.js';
 import { handleReadiness } from './readiness.js';
 import { enforceRateLimit, resolveClientIp } from './rate-limit-middleware.js';
-import { resolveWebDistDir, serveStaticAsset } from './static-assets.js';
+import { resolveEffectiveWebDistDir, serveStaticAsset } from './static-assets.js';
 import { createAppContext, type AppContext } from './app-context.js';
 import {
   handleConfirmPasswordReset,
@@ -329,18 +327,17 @@ if (isMainModule) {
   }
 
   // BUILD 32B HOTFIX — resolved relative to this file's own on-disk
-  // location, never `process.cwd()` (see static-assets.ts's own doc
-  // comment: a relative WEB_DIST_DIR resolved against the launch directory
-  // silently 404s if that directory isn't the repo root — the exact real
-  // defect found on the live Render deployment).
-  const webDistDir = resolveWebDistDir(env.WEB_DIST_DIR);
-  if (webDistDir && !existsSync(join(webDistDir, 'index.html'))) {
-    // Visible immediately rather than discovered as a mysterious 404 on
-    // every request — never the case in a correctly built+deployed image,
-    // but a wrong WEB_DIST_DIR value (or a build that never ran) should
-    // say so plainly, not silently serve 404 "Not found" forever.
-    logger.warn(`WEB_DIST_DIR is set but no index.html was found there — the frontend will not be served.`, { webDistDir });
-  }
+  // location, never `process.cwd()` (a relative WEB_DIST_DIR resolved
+  // against the launch directory silently 404s if that directory isn't
+  // the repo root — the first real defect found on the live Render
+  // deployment). BUILD 32B SECOND HOTFIX — falls back to this app's own
+  // known-correct default build output location if the configured value
+  // doesn't actually contain an index.html (e.g. a typo like
+  // `app/web/dist` — the second real production incident this exact env
+  // var caused), logging a clear warning either way. See
+  // static-assets.ts's `resolveEffectiveWebDistDir` for the full
+  // reasoning and its own dedicated unit tests.
+  const webDistDir = resolveEffectiveWebDistDir(env.WEB_DIST_DIR, logger);
 
   const httpServer = createApp(context, logger, parseAllowedOrigins(env.ALLOWED_ORIGINS), createInMemoryMetrics(), webDistDir).listen(
     env.API_PORT,

@@ -2,8 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, afterEach, beforeEach } from 'vitest';
-import { resolveWebDistDir, serveStaticAsset } from './static-assets.js';
+import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest';
+import type { Logger } from '@avs/shared';
+import { defaultWebDistDir, hasIndexHtml, resolveEffectiveWebDistDir, resolveWebDistDir, serveStaticAsset } from './static-assets.js';
+
+function fakeLogger(): Logger {
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
 
 function fakeResponse() {
   const chunks: Buffer[] = [];
@@ -102,5 +107,58 @@ describe('resolveWebDistDir (BUILD 32B HOTFIX — real production defect: a rela
     const result = resolveWebDistDir('apps/web/dist');
     expect(result).toBe(join(expectedRepoRoot, 'apps', 'web', 'dist'));
     expect(isAbsolute(result!)).toBe(true);
+  });
+
+  it('BUILD 32B: reproduces the exact second real production incident — a typo (missing the "s" in "apps") resolves to a real, wrong, sibling path, not an error', () => {
+    // The live Render log reported the resolved path as "/app/app/web/dist"
+    // (a double "app" segment) — this is exactly what a Docker WORKDIR of
+    // "/app" plus a WEB_DIST_DIR value of "app/web/dist" (typo) produces,
+    // confirming the configured *value* was wrong, not this function's math.
+    const withTypo = resolveWebDistDir('app/web/dist');
+    const withoutTypo = resolveWebDistDir('apps/web/dist');
+    expect(withTypo).not.toBe(withoutTypo);
+    expect(withTypo).toContain(`${join('app', 'web', 'dist')}`);
+  });
+});
+
+describe('resolveEffectiveWebDistDir (BUILD 32B SECOND HOTFIX — self-heals a misconfigured WEB_DIST_DIR)', () => {
+  let configuredDir: string;
+
+  beforeEach(() => {
+    configuredDir = mkdtempSync(join(tmpdir(), 'avs-web-dist-configured-'));
+  });
+
+  afterEach(() => {
+    rmSync(configuredDir, { recursive: true, force: true });
+  });
+
+  it('returns undefined and never warns when WEB_DIST_DIR is unset — exact prior behavior, no fallback engaged', () => {
+    const logger = fakeLogger();
+    expect(resolveEffectiveWebDistDir(undefined, logger)).toBeUndefined();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured directory as-is, with no warning, when it already has a real index.html', () => {
+    writeFileSync(join(configuredDir, 'index.html'), '<html>real build output</html>');
+    const logger = fakeLogger();
+    expect(resolveEffectiveWebDistDir(configuredDir, logger)).toBe(configuredDir);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the real default build output location — with a clear warning — when the configured directory has no index.html (the exact reported "app/web/dist" typo scenario), if that default has actually been built', () => {
+    // configuredDir deliberately has no index.html — this is the "typo" case.
+    const logger = fakeLogger();
+    const result = resolveEffectiveWebDistDir(configuredDir, logger);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    if (hasIndexHtml(defaultWebDistDir())) {
+      // apps/web/dist has actually been built in this environment (e.g. after `npm run build`) — the fallback should succeed and be used.
+      expect(result).toBe(defaultWebDistDir());
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('falling back to the real build output location'), expect.anything());
+    } else {
+      // apps/web/dist was never built here — nothing to fall back to; the misconfigured value is kept (same graceful-degradation as before this hotfix), with a warning saying so.
+      expect(result).toBe(configuredDir);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('the frontend will not be served'), expect.anything());
+    }
   });
 });

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ServerResponse } from 'node:http';
+import type { Logger } from '@avs/shared';
 
 /**
  * BUILD 32B (Frontend Production Deployment) — serves the built frontend
@@ -68,6 +69,67 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '
 export function resolveWebDistDir(rawValue: string | undefined): string | undefined {
   if (!rawValue) return undefined;
   return isAbsolute(rawValue) ? rawValue : resolve(REPO_ROOT, rawValue);
+}
+
+/**
+ * BUILD 32B SECOND HOTFIX — the fix above resolves whatever `WEB_DIST_DIR`
+ * value it's given correctly, but a second real production incident
+ * (`WEB_DIST_DIR` configured as `app/web/dist` — missing the "s" in
+ * "apps," reproduced locally: `resolveWebDistDir('app/web/dist')` really
+ * does resolve to `<repo root>/app/web/dist`, exactly matching the
+ * reported live log path) showed that "resolves correctly" isn't the same
+ * as "resolves to somewhere real" — a single mistyped character in an
+ * operator-supplied path is silent until someone notices the frontend
+ * never loads. There is exactly one correct value this app's own build
+ * ever produces (`apps/web/dist`, relative to the repo root this same
+ * module already knows how to find) — `server.ts`'s bootstrap uses this
+ * as a same-origin-preserving fallback when the configured value doesn't
+ * pan out, so a typo degrades to "frontend served from the real default,
+ * with a warning" instead of "frontend never loads."
+ */
+export function defaultWebDistDir(): string {
+  return resolve(REPO_ROOT, 'apps', 'web', 'dist');
+}
+
+/** Whether `dir` is a real directory containing a real `index.html` — the one thing this whole module needs to actually be true before serving anything from it. */
+export function hasIndexHtml(dir: string): boolean {
+  const indexPath = join(dir, 'index.html');
+  return existsSync(indexPath) && statSync(indexPath).isFile();
+}
+
+/**
+ * The single decision point `server.ts`'s bootstrap uses: resolves
+ * `rawValue` (BUILD 32B's own path-resolution fix), and if the result
+ * doesn't actually contain a real `index.html` (BUILD 32B's second
+ * hotfix — a typo like `app/web/dist`), falls back to this app's own
+ * known-correct default build output location instead of silently never
+ * serving the frontend. Logs exactly one warning either way so a
+ * misconfiguration is never silent, even though the fallback keeps the
+ * app working. Extracted as its own pure(ish) function — taking `logger`
+ * as a parameter, never importing a global one — specifically so this
+ * decision is unit-testable without spawning a real process (the
+ * `isMainModule` bootstrap block in server.ts is not otherwise
+ * exercised by any test).
+ */
+export function resolveEffectiveWebDistDir(rawValue: string | undefined, logger: Logger): string | undefined {
+  const configured = resolveWebDistDir(rawValue);
+  if (!configured) return undefined;
+  if (hasIndexHtml(configured)) return configured;
+
+  const fallback = defaultWebDistDir();
+  if (hasIndexHtml(fallback)) {
+    logger.warn('WEB_DIST_DIR is set but no index.html was found there — falling back to the real build output location. Fix WEB_DIST_DIR to remove this warning.', {
+      configuredWebDistDir: configured,
+      fallbackWebDistDir: fallback,
+    });
+    return fallback;
+  }
+
+  logger.warn('WEB_DIST_DIR is set but no index.html was found there (nor at the default build output location) — the frontend will not be served.', {
+    configuredWebDistDir: configured,
+    fallbackWebDistDir: fallback,
+  });
+  return configured;
 }
 
 /**
