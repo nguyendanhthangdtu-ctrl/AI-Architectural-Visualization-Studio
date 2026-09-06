@@ -18,9 +18,26 @@ import type { AssetRef, AssetStore } from '@avs/project-core';
  * anyway, so coupling asset metadata to SQLite would just be something to
  * undo later.
  */
+/**
+ * BUILD 32 (Production Deployment security hardening) — every real asset id
+ * this store ever creates is a `randomUUID()` (see `put()` below). An id
+ * reaching `get()`/`scheduleDeletion()` from elsewhere (a URL path segment,
+ * a JSON body field) is never assumed to already have that shape — this is
+ * defense-in-depth against ever constructing a filesystem path from
+ * attacker-influenced input, not a fix for a confirmed exploit (the only
+ * current caller, apps/api/src/routes.ts, already receives `assetId` from a
+ * route regex that structurally excludes '/', which this class has no way
+ * to rely on holding for every future caller).
+ */
+const ASSET_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class LocalDiskAssetStore implements AssetStore {
   constructor(private readonly baseDir: string) {
     mkdirSync(baseDir, { recursive: true });
+  }
+
+  private isValidId(id: string): boolean {
+    return ASSET_ID_PATTERN.test(id);
   }
 
   private dataPath(id: string): string {
@@ -46,6 +63,7 @@ export class LocalDiskAssetStore implements AssetStore {
   }
 
   async get(id: AssetId): Promise<{ ref: AssetRef; data: Uint8Array } | null> {
+    if (!this.isValidId(id)) return null; // never a real asset id — never even builds a path from it, same "not found" outcome as any other absent id
     if (!existsSync(this.metaPath(id)) || !existsSync(this.dataPath(id))) return null;
     const ref = JSON.parse(readFileSync(this.metaPath(id), 'utf-8')) as AssetRef;
     const data = new Uint8Array(readFileSync(this.dataPath(id)));
@@ -69,6 +87,7 @@ export class LocalDiskAssetStore implements AssetStore {
   }
 
   async scheduleDeletion(id: AssetId): Promise<void> {
+    if (!this.isValidId(id)) return; // never a real asset id — nothing to delete, same no-op as an already-absent id
     if (existsSync(this.dataPath(id))) rmSync(this.dataPath(id));
     if (existsSync(this.metaPath(id))) rmSync(this.metaPath(id));
   }

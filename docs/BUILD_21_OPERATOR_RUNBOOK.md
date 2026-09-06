@@ -22,6 +22,7 @@ holds — an empty environment starts cleanly). What each one unlocks:
 | `ASSET_URL_SIGNING_SECRET` | Signs asset URLs | Asset URLs stay unsigned/unauthenticated |
 | `REGISTRATION_SECRET` | Enables `POST /auth/register` | Registration is disabled entirely (deny-by-default) |
 | `TRUST_HTTPS` | `true`/`false` — gates cookie `Secure` + HSTS | Defaults `false`; **setting `true` without `ASSET_URL_SIGNING_SECRET` refuses to start** (BUILD 19 fail-fast rule) |
+| `TRUST_PROXY` | `true`/`false` — trust `X-Forwarded-For` for IP-keyed rate limiting (BUILD 32) | Defaults `false`; set `true` only once a real reverse proxy always sets that header itself, else every client behind the proxy shares one rate-limit bucket |
 | `API_PORT` | Listen port | Defaults `8080` |
 | `RUN_LIVE_PROVIDER_SMOKE_TEST` | Opt-in live provider test (see §7) | Live suite skips |
 | `EMAIL_PROVIDER` | `resend` — real email vendor (BUILD 22) | Unset = `InMemoryEmailSender`, never delivers |
@@ -62,6 +63,24 @@ node apps/api/dist/server.js
 A misconfigured/invalid environment refuses to start with a clear message (never a silent
 partial start) — e.g. `TRUST_HTTPS=true` without `ASSET_URL_SIGNING_SECRET`.
 
+**BUILD 32 — via Docker**: a `Dockerfile`/`.dockerignore` now exist at the repo root (see
+their own comments for the full reasoning — not build-tested against a real Docker daemon in
+this repo's own build environment, verify once before relying on it):
+
+```bash
+docker build -t avs-api .
+docker run -p 8080:8080 \
+  -e DATABASE_URL=/data/avs.sqlite3 -v avs-data:/data \
+  -e ASSET_STORE_URL=/data/assets \
+  -e REGISTRATION_SECRET=<generated> \
+  -e ASSET_URL_SIGNING_SECRET=<generated> \
+  -e ALLOWED_ORIGINS=https://your-real-domain \
+  avs-api
+```
+
+The image runs only `apps/api` — the frontend (`apps/web`) builds to a separate static
+`dist/` bundle meant for a static host/CDN, not served by this container.
+
 ## 4. Checking health
 
 ```bash
@@ -79,9 +98,11 @@ curl -s http://localhost:8080/ready
 {
   "status": "ready",
   "checks": { "database": { "status": "ok" }, "assetStore": { "status": "ok" } },
+  "persistence": { "database": { "persistent": true }, "assetStore": { "persistent": true } },
   "providers": {
     "gemini": { "configured": true },
     "nanoBanana": { "configured": true },
+    "nanoBananaPro": { "configured": true },
     "chatgptImage": { "configured": false },
     "veo": { "configured": false },
     "email": { "configured": false }
@@ -95,10 +116,17 @@ auth/asset traffic before an AI/email key is added). `providers.*.configured` me
 is present**, nothing more — it is never proof that provider has been verified against a real
 request. That evidence only ever comes from §7 (AI) or §8 (email) below actually succeeding.
 
+**BUILD 32**: `persistence.*.persistent` is `false` whenever `DATABASE_URL`/`ASSET_STORE_URL`
+was left unset (silently defaulting to `:memory:`/a fresh OS temp directory) — **check this
+before relying on a deployment**: `false` means every project/generation/user is wiped on the
+next restart. The server also logs one warning at startup when either is `false`. Never
+affects overall `status` — ephemeral storage is a legitimate, intentional choice for a
+short-lived preview/demo deployment, not a failure.
+
 ## 6. Running tests
 
 ```bash
-npx vitest run          # unit + integration + security, ~559 tests, no credentials needed
+npx vitest run          # unit + integration + security, 630+ tests, no credentials needed
 npx tsc -b --force       # typecheck, whole workspace
 npm run lint             # eslint, whole workspace
 npm run build            # production build (tsc + vite)
@@ -162,7 +190,7 @@ curl -s -b cookies.txt "http://localhost:8080/assets/<id>?exp=...&sig=..." -o ou
 
 Means the configured API key is invalid, revoked, or lacks the needed scope/project access.
 The response is `502` with the adapter's own code (e.g. `NANO_BANANA_PROVIDER_ERROR`) and
-`providerCode: "PROVIDER_AUTH_FAILED"` — never retryable. Rotate the key (see §14) and
+`providerCode: "PROVIDER_AUTH_FAILED"` — never retryable. Rotate the key (see §15) and
 restart the process; there is nothing to retry on the existing request.
 
 ## 11. Handling 429 (provider rate limited)
@@ -181,7 +209,15 @@ this codebase.
 hangs the request indefinitely and never leaves a job stuck `'running'` forever — it's
 marked `'failed'` and the caller sees a clean, retryable error.
 
-## 13. Rollback
+## 13. Graceful shutdown (BUILD 32)
+
+`SIGTERM`/`SIGINT` (e.g. a container orchestrator stopping/restarting the process, or Ctrl-C
+locally) stop the HTTP server from accepting new connections, let in-flight requests finish,
+close the database handle cleanly, then exit. A 10-second bounded timer forces exit if some
+connection never closes, so shutdown can never hang indefinitely. Give the process at least a
+few seconds of grace period in your orchestrator's stop signal before it sends `SIGKILL`.
+
+## 14. Rollback
 
 ```bash
 git log --oneline -5              # find the commit before this build
@@ -192,7 +228,7 @@ npm run build && node apps/api/dist/server.js
 
 No database migration, no schema change, and no env var removal is required either way.
 
-## 14. Rotating a credential
+## 15. Rotating a credential
 
 1. Obtain the new key from the provider's own console.
 2. Update your secret manager/`.env` — never edit it in place in a way that gets logged.
@@ -206,7 +242,7 @@ No database migration, no schema change, and no env var removal is required eith
    now reports `providers.email.configured: false` — the app falls back to
    `InMemoryEmailSender` cleanly, never a broken state.
 
-## 15. What must never be committed
+## 16. What must never be committed
 
 - `.env` (already `.gitignore`d — verify with `git check-ignore -v .env` before any commit).
 - Any real API key, `REGISTRATION_SECRET`, `ASSET_URL_SIGNING_SECRET`, or `RESEND_API_KEY`

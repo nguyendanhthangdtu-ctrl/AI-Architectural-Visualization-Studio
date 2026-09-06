@@ -83,6 +83,24 @@ const serverEnvSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
 
+  // BUILD 32 (Production Deployment) — docs/03 §11's documented topology,
+  // CLIENT -> HTTPS/TLS REVERSE PROXY -> API, means this process never sees
+  // the real client IP on `req.socket.remoteAddress` — it sees the proxy's.
+  // Per-IP rate limiting on the two routes that key by IP (`/auth/login`,
+  // `/auth/register` — see rate-limit-middleware.ts) would otherwise bucket
+  // every real client together under the proxy's one address. Same
+  // opt-in-only shape as `TRUST_HTTPS`: defaults to `false` so a direct
+  // (no-proxy) deployment isn't tricked by a client-supplied
+  // `X-Forwarded-For` header into spoofing its rate-limit identity; set to
+  // `true` only once a real reverse proxy is confirmed to always set that
+  // header itself (docs/03 §11 — the same reverse proxy `TRUST_HTTPS=true`
+  // already assumes exists).
+  TRUST_PROXY: z
+    .enum(['true', 'false'])
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
+
   // BUILD 22 (Real Email Vendor Integration) — real transactional email
   // (password reset today). `EMAIL_PROVIDER` unset (the default) means no
   // real vendor is wired: `EmailSender` stays `InMemoryEmailSender`

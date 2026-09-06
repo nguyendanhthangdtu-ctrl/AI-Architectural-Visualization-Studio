@@ -1,0 +1,33 @@
+# BUILD 32 (Production Deployment) — never let a secret, local data file, or
+# unnecessary local artifact reach the Docker build context/image.
+
+# Secrets — never bake a real credential into an image layer.
+.env
+.env.local
+.env.*.local
+
+# Local persisted data (SQLite file + local-disk assets) — a real deployment
+# mounts its own volume at these paths; never ship dev data in the image.
+data/
+**/data/
+*.sqlite3*
+*.db*
+
+# VCS / editor / OS noise
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Dependencies and build output — installed/built fresh inside the image
+# (the Dockerfile's builder stage runs `npm ci` and `npm run build` itself).
+node_modules/
+**/node_modules/
+**/dist/
+**/coverage/
+
+# Claude Code / tooling directories not needed inside the image.
+.claude/

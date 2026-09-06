@@ -36,6 +36,13 @@ describe('LocalDiskAssetStore', () => {
     await expect(store.get(ref.id)).resolves.toBeNull();
   });
 
+  it('BUILD 32: never constructs a filesystem path outside baseDir from a malformed id — treats it as not found', async () => {
+    await expect(store.get('../../../etc/passwd' as AssetId)).resolves.toBeNull();
+    await expect(store.get('..' as AssetId)).resolves.toBeNull();
+    // scheduleDeletion must be a safe no-op too, never attempting rmSync outside baseDir.
+    await expect(store.scheduleDeletion('../../../etc/passwd' as AssetId)).resolves.toBeUndefined();
+  });
+
   it('survives being re-opened against the same directory (real disk durability)', async () => {
     const ref = await store.put({ projectId: 'p1' as ProjectId, contentType: 'image/png', data: new Uint8Array([1, 2, 3]) });
     const reopened = new LocalDiskAssetStore(dir);

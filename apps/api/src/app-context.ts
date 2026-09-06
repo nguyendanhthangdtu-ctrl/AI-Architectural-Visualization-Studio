@@ -94,6 +94,8 @@ export interface AppContext {
   registrationSecret: string | undefined;
   /** Sets the session cookie's `Secure` attribute and gates `Strict-Transport-Security` — see env.ts's `TRUST_HTTPS`. */
   cookieSecure: boolean;
+  /** BUILD 32 — whether to trust `X-Forwarded-For` for IP-keyed rate limiting; see env.ts's `TRUST_PROXY`. */
+  trustProxy: boolean;
   authRateLimiter: RateLimiter;
   /** BUILD 19 Phase 2 — the swappable "who does this session belong to" boundary; `requireAuth()` never looks up a session row directly. */
   identityProvider: IdentityProvider;
@@ -121,6 +123,24 @@ export interface AppContext {
     email: boolean;
   }>;
   /**
+   * BUILD 32 (Production Deployment) — whether this context's storage was
+   * given a real, durable location (`DATABASE_URL`/`ASSET_STORE_URL`) versus
+   * silently defaulting to `:memory:`/a fresh OS temp directory. Neither
+   * state is wrong on its own (ephemeral is a legitimate, intentional
+   * choice for local dev, tests, and short-lived preview deployments) — the
+   * point is that `GET /ready` can now say so explicitly (docs/03 §13
+   * "readiness rõ ràng") instead of an operator only discovering "storage
+   * was ephemeral all along" the hard way, after a restart wiped every
+   * project. Booleans only — never the real path, which stays a secret
+   * (`SECRET_ENV_KEYS` in `packages/shared/src/env.ts` already includes
+   * `DATABASE_URL`; `readiness.ts`'s own doc comment: "Never returns a
+   * stack trace, a file path, or any secret").
+   */
+  persistence: Readonly<{
+    database: boolean;
+    assetStore: boolean;
+  }>;
+  /**
    * BUILD 21 Phase 15 (Observability) — used by `routes.ts`'s generation path
    * to emit one structured, secret-free log line per attempt (requestId,
    * provider, model, latency, outcome). Defaults to the same
@@ -129,6 +149,16 @@ export interface AppContext {
    * to assert on emitted log content without touching real stdout).
    */
   logger: Logger;
+  /**
+   * BUILD 32 (Production Deployment) — releases the real resources this
+   * context opened (today: the SQLite handle's `close()`, which flushes any
+   * pending WAL checkpoint and releases its file lock cleanly). WAL mode
+   * already makes an unclean process exit crash-safe (no corruption), so
+   * this is a clean-shutdown nicety, not a correctness requirement — called
+   * by `server.ts`'s SIGTERM/SIGINT handler after the HTTP server itself
+   * has stopped accepting new connections and drained in-flight ones.
+   */
+  shutdown: () => void;
 }
 
 /**
@@ -159,6 +189,8 @@ export function createAppContext(
     assetUrlSigningSecret?: string | undefined;
     registrationSecret?: string | undefined;
     cookieSecure?: boolean | undefined;
+    /** BUILD 32 — see env.ts's `TRUST_PROXY`. */
+    trustProxy?: boolean | undefined;
     /** Defaults to a real vendor when `emailProvider`+its credential are set, else `InMemoryEmailSender`. Supplying this directly always wins (tests do, to inject a spy/fake). */
     emailSender?: EmailSender | undefined;
     passwordResetTokenTtlMs?: number | undefined;
@@ -218,6 +250,7 @@ export function createAppContext(
     sessionRepository,
     registrationSecret: config.registrationSecret,
     cookieSecure: config.cookieSecure ?? false,
+    trustProxy: config.trustProxy ?? false,
     authRateLimiter: createInMemoryRateLimiter(AUTH_ROUTE_RATE_LIMIT),
     identityProvider: createLocalIdentityProvider({ userRepository, sessionRepository }),
     passwordResetTokenRepository: new SqlitePasswordResetTokenRepository(db),
@@ -245,6 +278,11 @@ export function createAppContext(
       veo: Boolean(config.veoApiKey),
       email: config.emailProvider === 'resend' && Boolean(config.resendApiKey),
     },
+    persistence: {
+      database: Boolean(config.dbPath),
+      assetStore: Boolean(config.assetsDir),
+    },
     logger: config.logger ?? createConsoleLogger(),
+    shutdown: () => db.close(),
   };
 }

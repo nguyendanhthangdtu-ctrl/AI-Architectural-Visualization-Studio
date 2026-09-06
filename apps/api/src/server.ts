@@ -5,7 +5,7 @@ import { sendError } from './error-handling.js';
 import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
 import { applySecurityHeaders } from './security-headers.js';
 import { handleReadiness } from './readiness.js';
-import { enforceRateLimit } from './rate-limit-middleware.js';
+import { enforceRateLimit, resolveClientIp } from './rate-limit-middleware.js';
 import { createAppContext, type AppContext } from './app-context.js';
 import {
   handleConfirmPasswordReset,
@@ -100,13 +100,13 @@ export function createApp(
         }
 
         if (req.method === 'POST' && path === '/auth/register') {
-          enforceRateLimit(context.authRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          enforceRateLimit(context.authRateLimiter, resolveClientIp(req, context.trustProxy));
           await handleRegister(req, res, context);
           return;
         }
 
         if (req.method === 'POST' && path === '/auth/login') {
-          enforceRateLimit(context.authRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          enforceRateLimit(context.authRateLimiter, resolveClientIp(req, context.trustProxy));
           await handleLogin(req, res, context);
           return;
         }
@@ -114,13 +114,13 @@ export function createApp(
         // BUILD 19 (Account Recovery) — public: a caller requesting/confirming
         // a reset is, by definition, not necessarily holding a valid session.
         if (req.method === 'POST' && path === '/auth/password-reset/request') {
-          enforceRateLimit(context.passwordResetRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          enforceRateLimit(context.passwordResetRateLimiter, resolveClientIp(req, context.trustProxy));
           await handleRequestPasswordReset(req, res, context);
           return;
         }
 
         if (req.method === 'POST' && path === '/auth/password-reset/confirm') {
-          enforceRateLimit(context.passwordResetRateLimiter, req.socket.remoteAddress ?? 'unknown');
+          enforceRateLimit(context.passwordResetRateLimiter, resolveClientIp(req, context.trustProxy));
           await handleConfirmPasswordReset(req, res, context);
           return;
         }
@@ -248,25 +248,65 @@ const isMainModule = process.argv[1] !== undefined && import.meta.url === pathTo
 if (isMainModule) {
   const logger = createConsoleLogger();
   const env = parseServerEnv(); // throws — and never starts — on invalid config; no secret required to succeed
-  createApp(
-    createAppContext({
-      geminiApiKey: env.GEMINI_API_KEY,
-      nanoBananaApiKey: env.NANO_BANANA_API_KEY,
-      chatgptImageApiKey: env.CHATGPT_IMAGE_API_KEY,
-      veoApiKey: env.VEO_API_KEY,
-      dbPath: env.DATABASE_URL,
-      assetsDir: env.ASSET_STORE_URL,
-      assetUrlSigningSecret: env.ASSET_URL_SIGNING_SECRET,
-      registrationSecret: env.REGISTRATION_SECRET,
-      cookieSecure: env.TRUST_HTTPS,
-      emailProvider: env.EMAIL_PROVIDER,
-      emailFrom: env.EMAIL_FROM,
-      emailReplyTo: env.EMAIL_REPLY_TO,
-      resendApiKey: env.RESEND_API_KEY,
-    }),
-    logger,
-    parseAllowedOrigins(env.ALLOWED_ORIGINS),
-  ).listen(env.API_PORT, () => {
+  const context = createAppContext({
+    geminiApiKey: env.GEMINI_API_KEY,
+    nanoBananaApiKey: env.NANO_BANANA_API_KEY,
+    chatgptImageApiKey: env.CHATGPT_IMAGE_API_KEY,
+    veoApiKey: env.VEO_API_KEY,
+    dbPath: env.DATABASE_URL,
+    assetsDir: env.ASSET_STORE_URL,
+    assetUrlSigningSecret: env.ASSET_URL_SIGNING_SECRET,
+    registrationSecret: env.REGISTRATION_SECRET,
+    cookieSecure: env.TRUST_HTTPS,
+    trustProxy: env.TRUST_PROXY,
+    emailProvider: env.EMAIL_PROVIDER,
+    emailFrom: env.EMAIL_FROM,
+    emailReplyTo: env.EMAIL_REPLY_TO,
+    resendApiKey: env.RESEND_API_KEY,
+  });
+
+  // BUILD 32 (Production Deployment) — an operator who forgets to set
+  // DATABASE_URL/ASSET_STORE_URL gets a server that starts fine and reports
+  // /ready as healthy (ephemeral storage is a legitimate choice — see
+  // AppContext.persistence's doc comment), but every project/generation/
+  // user would be silently wiped on the next restart. One clear, secret-free
+  // startup log line (never the real path — that's still a secret) so this
+  // is visible immediately rather than discovered the hard way.
+  if (!context.persistence.database || !context.persistence.assetStore) {
+    logger.warn('Running with ephemeral storage — data will not survive a restart. Set DATABASE_URL/ASSET_STORE_URL for a real deployment.', {
+      databasePersistent: context.persistence.database,
+      assetStorePersistent: context.persistence.assetStore,
+    });
+  }
+
+  const httpServer = createApp(context, logger, parseAllowedOrigins(env.ALLOWED_ORIGINS)).listen(env.API_PORT, () => {
     logger.info(`apps/api listening on :${env.API_PORT}`);
   });
+
+  // BUILD 32 (Production Deployment) — graceful shutdown: stop accepting new
+  // connections, let in-flight requests finish, then release the DB handle.
+  // A bounded force-exit is the safety net against a connection that never
+  // closes (e.g. a client that never reads the response) hanging shutdown
+  // forever — the exact failure mode a container orchestrator's SIGTERM
+  // grace period exists to catch.
+  const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 10_000;
+  let shuttingDown = false;
+  function shutdown(signal: NodeJS.Signals): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`Received ${signal}, shutting down gracefully…`);
+    const forceExit = setTimeout(() => {
+      logger.warn('Graceful shutdown timed out — forcing exit.');
+      process.exit(1);
+    }, GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+    forceExit.unref();
+    httpServer.close((error) => {
+      if (error) logger.error('Error while closing the HTTP server', { code: 'SHUTDOWN_ERROR' });
+      context.shutdown();
+      clearTimeout(forceExit);
+      process.exit(error ? 1 : 0);
+    });
+  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }

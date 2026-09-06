@@ -35,11 +35,21 @@ export interface ProviderConfigurationCheck {
   configured: boolean;
 }
 
+/** BUILD 32 — see `AppContext.persistence`'s own doc comment (app-context.ts). Never the real path — just whether one was configured. */
+export interface PersistenceCheck {
+  persistent: boolean;
+}
+
 export interface ReadinessResult {
   status: 'ready' | 'not_ready';
   checks: {
     database: ReadinessCheck;
     assetStore: ReadinessCheck;
+  };
+  /** BUILD 32 (Production Deployment) — durable (a real configured location) vs. ephemeral (`:memory:`/a temp dir); never affects `status` — ephemeral is a legitimate, intentional choice, not a failure. */
+  persistence: {
+    database: PersistenceCheck;
+    assetStore: PersistenceCheck;
   };
   providers: {
     gemini: ProviderConfigurationCheck;
@@ -70,6 +80,10 @@ export async function checkReadiness(context: AppContext): Promise<ReadinessResu
   return {
     status,
     checks: { database, assetStore },
+    persistence: {
+      database: { persistent: context.persistence.database },
+      assetStore: { persistent: context.persistence.assetStore },
+    },
     providers: {
       gemini: { configured: context.providerConfiguration.gemini },
       nanoBanana: { configured: context.providerConfiguration.nanoBanana },

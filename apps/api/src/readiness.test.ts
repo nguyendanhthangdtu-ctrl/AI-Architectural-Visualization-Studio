@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './server.js';
@@ -30,6 +33,24 @@ describe('GET /ready (BUILD 19 Production Environment Validation)', () => {
     const body = (await res.json()) as { status: string; checks: { database: { status: string }; assetStore: { status: string } } };
     expect(body.status).toBe('ready');
     expect(body.checks).toEqual({ database: { status: 'ok' }, assetStore: { status: 'ok' } });
+  });
+
+  it('BUILD 32: reports storage as ephemeral by default, and durable once a real DATABASE_URL/ASSET_STORE_URL is configured — never affecting overall readiness', async () => {
+    server = createApp(createAppContext());
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/ready`);
+    const body = (await res.json()) as { status: string; persistence: { database: { persistent: boolean }; assetStore: { persistent: boolean } } };
+    expect(body.persistence).toEqual({ database: { persistent: false }, assetStore: { persistent: false } });
+    expect(body.status).toBe('ready'); // ephemeral storage is a legitimate choice, never a readiness failure
+
+    server.close();
+    server = createApp(createAppContext({ dbPath: ':memory:', assetsDir: mkdtempSync(join(tmpdir(), 'avs-readiness-test-')) }));
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port: port2 } = server.address() as AddressInfo;
+    const res2 = await fetch(`http://127.0.0.1:${port2}/ready`);
+    const body2 = (await res2.json()) as { persistence: { database: { persistent: boolean }; assetStore: { persistent: boolean } } };
+    expect(body2.persistence).toEqual({ database: { persistent: true }, assetStore: { persistent: true } });
   });
 
   it('BUILD 21: reports each AI provider as configured only when a real key was supplied, never assuming operational status', async () => {
