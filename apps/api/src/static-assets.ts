@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, resolve, sep } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ServerResponse } from 'node:http';
 
 /**
@@ -41,6 +42,33 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.ttf': 'font/ttf',
   '.txt': 'text/plain; charset=utf-8',
 };
+
+/**
+ * BUILD 32B HOTFIX — a real production defect found on the live Render
+ * deployment: `WEB_DIST_DIR=apps/web/dist` is a relative path, and it was
+ * being resolved against `process.cwd()` — which is NOT guaranteed to be
+ * the repo root a launcher actually runs the start command from (verified
+ * by reproducing it locally: launching `node dist/server.js` from inside
+ * `apps/api` instead of the repo root reproduces the exact reported
+ * symptom — the startup log still prints "Serving frontend..." because
+ * that only echoes the raw env value, but `GET /` 404s, because
+ * `apps/web/dist` resolved against the wrong directory doesn't exist).
+ *
+ * This file's own on-disk location is a fixed, known anchor regardless of
+ * the process's launch directory: `apps/api/src/static-assets.ts` in
+ * source, `apps/api/dist/static-assets.js` once built — both exactly two
+ * directories below the repo root. Resolving a relative `WEB_DIST_DIR`
+ * against that anchor (not `process.cwd()`) makes it correct no matter
+ * where the process happens to be launched from. An already-absolute
+ * value is used as-is (an explicit override for an unusual deployment
+ * layout), and `undefined`/empty stays `undefined` (frontend serving off).
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+export function resolveWebDistDir(rawValue: string | undefined): string | undefined {
+  if (!rawValue) return undefined;
+  return isAbsolute(rawValue) ? rawValue : resolve(REPO_ROOT, rawValue);
+}
 
 /**
  * Resolves a URL path to a real file under `webDistDir`, refusing to ever

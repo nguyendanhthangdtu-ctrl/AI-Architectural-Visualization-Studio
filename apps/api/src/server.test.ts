@@ -95,6 +95,16 @@ describe('apps/api same-origin frontend serving (BUILD 32B, opt-in via webDistDi
     expect(res.status).toBe(401); // falls through to requireAuth exactly as before, never the static handler
   });
 
+  it('BUILD 32B HOTFIX: GET / serves the frontend index.html, not "Not found" — the exact real defect reported on the live Render deployment', async () => {
+    server = createApp(createAppContext(), undefined, undefined, undefined, webDistDir);
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toBe('<html>SPA shell</html>');
+  });
+
   it('serves the frontend shell for a client-side route once webDistDir is passed', async () => {
     server = createApp(createAppContext(), undefined, undefined, undefined, webDistDir);
     await new Promise<void>((resolve) => server!.listen(0, resolve));

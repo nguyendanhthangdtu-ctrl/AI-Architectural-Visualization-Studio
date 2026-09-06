@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
-import { serveStaticAsset } from './static-assets.js';
+import { resolveWebDistDir, serveStaticAsset } from './static-assets.js';
 
 function fakeResponse() {
   const chunks: Buffer[] = [];
@@ -78,5 +79,28 @@ describe('serveStaticAsset (BUILD 32B Frontend Production Deployment)', () => {
     serveStaticAsset(res as never, dir, '/../../../etc/passwd');
     expect(res.status).toBe(200); // SPA fallback, not the traversed file
     expect(res.body).toBe('<html>SPA shell</html>');
+  });
+});
+
+describe('resolveWebDistDir (BUILD 32B HOTFIX — real production defect: a relative WEB_DIST_DIR resolved against process.cwd() 404s when the process is launched from any directory other than the repo root, reproduced by running the real production build from apps/api instead of the repo root)', () => {
+  it('returns undefined for an unset/empty value — frontend serving stays off, exact prior behavior', () => {
+    expect(resolveWebDistDir(undefined)).toBeUndefined();
+    expect(resolveWebDistDir('')).toBeUndefined();
+  });
+
+  it('uses an already-absolute value as-is', () => {
+    const absolute = process.platform === 'win32' ? 'C:\\some\\absolute\\path' : '/some/absolute/path';
+    expect(resolveWebDistDir(absolute)).toBe(absolute);
+  });
+
+  it('resolves a relative value against this module\'s own on-disk location (repo root), not process.cwd() — the exact fix for the reported defect', () => {
+    // This test file lives in the same directory as static-assets.ts
+    // (apps/api/src), so computing "repo root" the identical way here
+    // independently verifies resolveWebDistDir's own computation without
+    // just re-asserting its implementation.
+    const expectedRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    const result = resolveWebDistDir('apps/web/dist');
+    expect(result).toBe(join(expectedRepoRoot, 'apps', 'web', 'dist'));
+    expect(isAbsolute(result!)).toBe(true);
   });
 });

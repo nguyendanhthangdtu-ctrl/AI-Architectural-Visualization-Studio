@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createConsoleLogger, createInMemoryMetrics, DomainError, parseServerEnv } from '@avs/shared';
@@ -6,7 +8,7 @@ import { applyCorsHeaders, parseAllowedOrigins } from './cors.js';
 import { applySecurityHeaders } from './security-headers.js';
 import { handleReadiness } from './readiness.js';
 import { enforceRateLimit, resolveClientIp } from './rate-limit-middleware.js';
-import { serveStaticAsset } from './static-assets.js';
+import { resolveWebDistDir, serveStaticAsset } from './static-assets.js';
 import { createAppContext, type AppContext } from './app-context.js';
 import {
   handleConfirmPasswordReset,
@@ -326,11 +328,25 @@ if (isMainModule) {
     });
   }
 
-  const httpServer = createApp(context, logger, parseAllowedOrigins(env.ALLOWED_ORIGINS), createInMemoryMetrics(), env.WEB_DIST_DIR).listen(
+  // BUILD 32B HOTFIX — resolved relative to this file's own on-disk
+  // location, never `process.cwd()` (see static-assets.ts's own doc
+  // comment: a relative WEB_DIST_DIR resolved against the launch directory
+  // silently 404s if that directory isn't the repo root — the exact real
+  // defect found on the live Render deployment).
+  const webDistDir = resolveWebDistDir(env.WEB_DIST_DIR);
+  if (webDistDir && !existsSync(join(webDistDir, 'index.html'))) {
+    // Visible immediately rather than discovered as a mysterious 404 on
+    // every request — never the case in a correctly built+deployed image,
+    // but a wrong WEB_DIST_DIR value (or a build that never ran) should
+    // say so plainly, not silently serve 404 "Not found" forever.
+    logger.warn(`WEB_DIST_DIR is set but no index.html was found there — the frontend will not be served.`, { webDistDir });
+  }
+
+  const httpServer = createApp(context, logger, parseAllowedOrigins(env.ALLOWED_ORIGINS), createInMemoryMetrics(), webDistDir).listen(
     env.API_PORT,
     () => {
       logger.info(`apps/api listening on :${env.API_PORT}`);
-      if (env.WEB_DIST_DIR) logger.info(`Serving frontend same-origin from ${env.WEB_DIST_DIR}`);
+      if (webDistDir) logger.info(`Serving frontend same-origin from ${webDistDir}`);
     },
   );
 
