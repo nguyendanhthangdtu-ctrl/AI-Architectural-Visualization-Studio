@@ -1,0 +1,44 @@
+name: CI
+
+# BUILD 32 (Production Deployment) — the minimum safe gate this repo can
+# run without any deployment platform/credential: install, typecheck,
+# lint, test (unit + integration + security-hardening — no live provider
+# calls, no credentials needed, see apps/api/src/mock-e2e.test.ts and
+# apps/api/src/security-hardening.test.ts), and a production build.
+#
+# No deploy job exists here — no deployment target/credentials are
+# configured for this repo (see docs/BUILD_21_OPERATOR_RUNBOOK.md and the
+# BUILD 32 final report). Do not add one that fabricates a deployment;
+# add a real deploy job only once a real target and its secrets exist in
+# this repository's own GitHub Actions configuration.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
