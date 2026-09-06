@@ -24,7 +24,7 @@ import styles from './EditPanel.module.css';
  */
 export function EditPanel() {
   const state = useProjectSessionState();
-  const { setState } = useProjectSessionActions();
+  const { setState, getState } = useProjectSessionActions();
   const [category, setCategory] = useState<EditCategory>('other');
   const [targetRegionDescription, setTargetRegionDescription] = useState('');
   const [intendedChange, setIntendedChange] = useState('');
@@ -52,6 +52,14 @@ export function EditPanel() {
       return;
     }
 
+    // BUILD 31 FIX — a real, verified race: this edit is built against the
+    // CURRENT output at the moment it's submitted (`sourceAssetId` below).
+    // If the user renders, edits again, or generates a new view before this
+    // request resolves, the output on screen has already moved on — this
+    // edit's result targets a base that no longer exists as "the latest
+    // output" and must not silently overwrite whatever superseded it.
+    const outputAssetIdAtRequestTime = state.latestOutputAssetId;
+
     setEditStatus('loading');
     setEditError(undefined);
     try {
@@ -65,17 +73,19 @@ export function EditPanel() {
         aspectRatio: state.scenario.aspectRatio,
         resolution: state.scenario.generationResolution,
       });
-      setState({
-        latestGenerationOutputUrls: result.outputAssetUrls,
-        latestOutputAssetId: result.edit.resultingAssetId,
-        // BUILD 30 FIX — same defect class as BUILD 28's Render fix
-        // (ModuleWorkspace.tsx): a successful edit produces a new,
-        // never-verified output, but this previously left a PASS/FAIL QC
-        // result from before the edit displayed against it. QC is
-        // per-generation (docs/15) and must be re-run against the edited
-        // output before any verdict is shown for it again.
-        qcState: null,
-      });
+      if (getState().latestOutputAssetId === outputAssetIdAtRequestTime) {
+        setState({
+          latestGenerationOutputUrls: result.outputAssetUrls,
+          latestOutputAssetId: result.edit.resultingAssetId,
+          // BUILD 30 FIX — same defect class as BUILD 28's Render fix
+          // (ModuleWorkspace.tsx): a successful edit produces a new,
+          // never-verified output, but this previously left a PASS/FAIL QC
+          // result from before the edit displayed against it. QC is
+          // per-generation (docs/15) and must be re-run against the edited
+          // output before any verdict is shown for it again.
+          qcState: null,
+        });
+      }
       setTargetRegionDescription('');
       setIntendedChange('');
       setEditStatus('idle');

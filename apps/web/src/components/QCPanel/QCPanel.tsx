@@ -34,7 +34,7 @@ const SCORE_LABELS: Record<string, string> = {
  */
 export function QCPanel() {
   const state = useProjectSessionState();
-  const { setState } = useProjectSessionActions();
+  const { setState, getState } = useProjectSessionActions();
   const [qcStatus, setQcStatus] = useState<QcUiStatus>('idle');
   const [qcError, setQcError] = useState<ErrorEnvelope | undefined>(undefined);
   const [regenerateStatus, setRegenerateStatus] = useState<RegenerateUiStatus>('idle');
@@ -44,6 +44,18 @@ export function QCPanel() {
 
   const handleRunQc = async () => {
     if (!state.currentProject || !state.latestGenerationId || !state.analysisId || state.locks.length !== 5) return;
+
+    // BUILD 31 FIX — a real, verified race: this QC request targets the
+    // CURRENT output at the moment it's submitted. If the user renders,
+    // edits, or generates a new view before this request resolves, the
+    // output this verdict describes is no longer the one on screen — the
+    // request/response pairing below is checked against the live store
+    // state at resolution time, not this closure's stale snapshot, so a
+    // late verdict for a superseded output is discarded rather than
+    // silently re-populating `qcState` with a stale PASS/FAIL for a
+    // different generation (docs/15 — QC is per-generation).
+    const generationIdAtRequestTime = state.latestGenerationId;
+    const outputAssetIdAtRequestTime = state.latestOutputAssetId;
 
     setQcStatus('running');
     setQcError(undefined);
@@ -55,7 +67,10 @@ export function QCPanel() {
         ...(state.normalizedRequest ? { resolvedStyle: state.normalizedRequest.resolvedStyle } : {}),
         instructions: state.normalizedRequest?.instructions ?? [],
       });
-      setState({ qcState: result.qc });
+      const current = getState();
+      const stillCurrent =
+        current.latestGenerationId === generationIdAtRequestTime && current.latestOutputAssetId === outputAssetIdAtRequestTime;
+      if (stillCurrent) setState({ qcState: result.qc });
       setQcStatus('idle');
     } catch (error) {
       setQcError(toErrorEnvelope(error, 'Something went wrong running QC.'));
@@ -86,6 +101,12 @@ export function QCPanel() {
       return;
     }
 
+    // BUILD 31 FIX — same class of race as Render/Edit/View's own fixes: if
+    // something else completes while this regenerate is in flight, its
+    // now-stale response must not overwrite that newer result.
+    const generationIdAtRequestTime = state.latestGenerationId;
+    const outputAssetIdAtRequestTime = state.latestOutputAssetId;
+
     setRegenerateStatus('running');
     setRegenerateError(undefined);
     try {
@@ -102,14 +123,17 @@ export function QCPanel() {
         scenarioVersion: state.scenario.normalizedAt,
         correctionInstruction,
       });
-      setState({
-        currentProject: result.project,
-        latestGenerationOutputUrls: result.outputAssetUrls,
-        latestGenerationId: result.generationId,
-        latestOutputAssetId: result.generation.outputAssets[0] ?? null,
-        qcState: null,
-        status: 'ready',
-      });
+      const current = getState();
+      if (current.latestGenerationId === generationIdAtRequestTime && current.latestOutputAssetId === outputAssetIdAtRequestTime) {
+        setState({
+          currentProject: result.project,
+          latestGenerationOutputUrls: result.outputAssetUrls,
+          latestGenerationId: result.generationId,
+          latestOutputAssetId: result.generation.outputAssets[0] ?? null,
+          qcState: null,
+          status: 'ready',
+        });
+      }
       setRegenerateStatus('idle');
     } catch (error) {
       setRegenerateError(toErrorEnvelope(error, 'Something went wrong regenerating the image.'));

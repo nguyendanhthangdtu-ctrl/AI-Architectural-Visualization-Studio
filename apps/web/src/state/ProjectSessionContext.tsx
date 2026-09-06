@@ -38,6 +38,14 @@ export function useProjectSessionActions() {
   return useMemo(
     () => ({
       setState: store.setState.bind(store),
+      // BUILD 31 FIX — lets an async handler read the CURRENT live state at
+      // the moment its request resolves, not the stale snapshot it closed
+      // over when the request started. Needed to detect "the user has moved
+      // on to a different generation while this request was in flight"
+      // races (e.g. QCPanel — see its own comment) without a second state
+      // system; every other consumer keeps using the reactive `state` from
+      // `useProjectSessionState()` for rendering.
+      getState: store.getState.bind(store),
     }),
     [store],
   );

@@ -302,4 +302,64 @@ describe('Mock E2E — Nano Banana 2 (BUILD 25 Part 14-G)', () => {
     expect(externalUrls).toEqual([]); // never generativelanguage.googleapis.com, never api.openai.com
     fetchSpy.mockRestore();
   });
+
+  it('BUILD 31: two concurrent generation requests (distinct Idempotency-Keys) against the same project each get their own job/asset, with no cross-contamination', async () => {
+    await start(contextWithMocks());
+    const session = await registerTestUser(baseUrl);
+
+    const createRes = await fetch(`${baseUrl}/projects`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Concurrency Villa', module: 'architecture' }),
+    }, session.cookie));
+    const project = (await createRes.json()) as { id: string };
+
+    const uploadRes = await fetch(`${baseUrl}/projects/${project.id}/assets`, withCookie({
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: ONE_PIXEL_PNG,
+    }, session.cookie));
+    const asset = (await uploadRes.json()) as { id: string };
+
+    function generationRequest(idempotencyKey: string, promptText: string) {
+      return fetch(`${baseUrl}/projects/${project.id}/generations`, withCookie({
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+        body: JSON.stringify({
+          promptText,
+          renderCore: 'Nano Banana',
+          aspectRatio: '1:1',
+          resolution: 'Preview',
+          sourceAssetId: asset.id,
+          referenceAssetIds: [],
+          promptVersion: 'v1',
+          scenarioVersion: 'v1',
+        }),
+      }, session.cookie));
+    }
+
+    // Fired concurrently (no await between) — two genuinely distinct, real requests racing through the real pipeline.
+    const [resA, resB] = await Promise.all([
+      generationRequest('concurrency-key-A', 'villa A'),
+      generationRequest('concurrency-key-B', 'villa B'),
+    ]);
+
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(201);
+    const bodyA = (await resA.json()) as { generationId: string; jobId: string; outputAssetUrls: string[] };
+    const bodyB = (await resB.json()) as { generationId: string; jobId: string; outputAssetUrls: string[] };
+
+    // Distinct jobs, distinct generations, distinct output assets — neither request's result leaked into the other's.
+    expect(bodyA.jobId).not.toBe(bodyB.jobId);
+    expect(bodyA.generationId).not.toBe(bodyB.generationId);
+    expect(bodyA.outputAssetUrls[0]).not.toBe(bodyB.outputAssetUrls[0]);
+
+    // Both real, retrievable output assets — no orphaned/dropped write from either concurrent request.
+    const [fetchedA, fetchedB] = await Promise.all([
+      fetch(`${baseUrl}${bodyA.outputAssetUrls[0]!}`, withCookie({}, session.cookie)),
+      fetch(`${baseUrl}${bodyB.outputAssetUrls[0]!}`, withCookie({}, session.cookie)),
+    ]);
+    expect(fetchedA.status).toBe(200);
+    expect(fetchedB.status).toBe(200);
+  });
 });

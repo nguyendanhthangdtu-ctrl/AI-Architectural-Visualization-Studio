@@ -157,6 +157,43 @@ describe('ModuleWorkspace — BUILD 13 real Render action', () => {
       expect(screen.queryByText('PASS')).not.toBeInTheDocument();
     });
 
+    it('BUILD 31 FIX: does not let a slow, now-stale render response overwrite a newer result from elsewhere (e.g. an Edit) that already completed', async () => {
+      let resolveRender!: (v: Response) => void;
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveRender = resolve; }));
+
+      const store = renderWithState({
+        currentProject: PROJECT,
+        sourceImage: { assetId: 'a1', url: '/assets/a1' },
+        scenario: SCENARIO,
+        promptDraft: 'a modern villa at golden hour',
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' })); // Render A starts, stays pending
+
+      // While Render A is still in flight, an Edit against the (still-null) prior output already completed.
+      store.setState({ latestGenerationId: 'gen-X', latestOutputAssetId: 'out-X', latestGenerationOutputUrls: ['/assets/out-X'] });
+
+      // Render A finally resolves — but it's now stale relative to gen-X.
+      resolveRender(
+        jsonResponse(
+          {
+            jobId: 'job-2',
+            generationId: 'gen-2',
+            versionId: 'v2',
+            project: { ...PROJECT, currentVersionId: 'v2' },
+            generation: { id: 'gen-2', status: 'succeeded', provider: 'nano-banana', outputAssets: ['out-2'] },
+            outputAssetUrls: ['/assets/out-2'],
+          },
+          { status: 201 },
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'RENDER — PHOTOREALISTIC ARCHITECTURE' })).not.toHaveTextContent('Rendering…'));
+      expect(store.getState().latestGenerationId).toBe('gen-X'); // must NOT be clobbered by the stale render
+      expect(store.getState().latestOutputAssetId).toBe('out-X');
+    });
+
     it('shows the real error envelope, not a fake image, when generation fails', async () => {
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       fetchMock.mockResolvedValueOnce(

@@ -172,5 +172,53 @@ describe('QCPanel — BUILD 17 AI QC / Auto-Regeneration', () => {
       await waitFor(() => expect(store.getState().latestGenerationId).toBe('gen-2'));
       expect(store.getState().qcState).toBeNull();
     });
+
+    it('BUILD 31 FIX: does not let a slow, now-stale regenerate response overwrite a newer result from elsewhere', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(jsonResponse({ generationId: 'gen-1', qc: FAIL_QC_RESULT }));
+
+      const store = renderWithState(READY_STATE);
+      fireEvent.click(screen.getByRole('button', { name: /run qc/i }));
+      await waitFor(() => expect(screen.getByText('FAIL')).toBeInTheDocument());
+
+      let resolveRegenerate!: (v: Response) => void;
+      fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveRegenerate = resolve; }));
+      fireEvent.click(screen.getByRole('button', { name: /regenerate/i })); // Regenerate A starts, stays pending
+
+      // While Regenerate A is still in flight, a render (or another action) already completed.
+      store.setState({ latestGenerationId: 'gen-X', latestOutputAssetId: 'out-X', latestGenerationOutputUrls: ['/assets/out-X'] });
+
+      resolveRegenerate(
+        jsonResponse(
+          { jobId: 'j2', generationId: 'gen-2', versionId: 'v2', project: { ...PROJECT, currentVersionId: 'v2' }, generation: { outputAssets: ['out-2'] }, outputAssetUrls: ['/assets/out-2'] },
+          { status: 201 },
+        ),
+      );
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(store.getState().latestGenerationId).toBe('gen-X'); // must NOT be clobbered by the stale regenerate
+      expect(store.getState().latestOutputAssetId).toBe('out-X');
+    });
+
+    it('BUILD 31 FIX: discards a stale QC response for a generation the user has already moved on from', async () => {
+      let resolveQc!: (v: Response) => void;
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveQc = resolve; }));
+
+      const store = renderWithState(READY_STATE);
+      fireEvent.click(screen.getByRole('button', { name: /run qc/i })); // QC A starts for gen-1/out-1, stays pending
+
+      // While QC A is still in flight, the user renders a brand new image
+      // (gen-2/out-2) — the exact same reset ModuleWorkspace.handleRender
+      // performs on a successful render.
+      store.setState({ latestGenerationId: 'gen-2', latestOutputAssetId: 'out-2', latestGenerationOutputUrls: ['/assets/out-2'], qcState: null });
+
+      // QC A (for the now-superseded gen-1) finally resolves.
+      resolveQc(jsonResponse({ generationId: 'gen-1', qc: PASS_QC_RESULT }));
+
+      // The button label reverting confirms handleRunQc actually finished processing the response.
+      await waitFor(() => expect(screen.getByRole('button', { name: /run qc/i })).toHaveTextContent('Run QC'));
+      expect(store.getState().qcState).toBeNull(); // must NOT be re-populated with gen-1's stale verdict
+    });
   });
 });

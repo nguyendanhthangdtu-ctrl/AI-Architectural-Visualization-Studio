@@ -181,6 +181,39 @@ describe('EditPanel — BUILD 14 Advanced Editor', () => {
       expect(store.getState().qcState).toBeNull();
     });
 
+    it('BUILD 31 FIX: does not let a slow, now-stale edit response overwrite a newer render that already completed', async () => {
+      let resolveEdit!: (v: Response) => void;
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveEdit = resolve; }));
+
+      const store = renderWithState(READY_STATE);
+      fireEvent.change(screen.getByLabelText('Target region'), { target: { value: 'the facade material' } });
+      fireEvent.change(screen.getByLabelText('Intended change'), { target: { value: 'replace with warm wood cladding' } });
+      fireEvent.click(screen.getByRole('button', { name: /apply edit/i })); // Edit A starts against out-1, stays pending
+
+      // While Edit A is still in flight, the user renders a brand new image (gen-2/out-2).
+      store.setState({ latestGenerationId: 'gen-2', latestOutputAssetId: 'out-2', latestGenerationOutputUrls: ['/assets/out-2'], qcState: null });
+
+      // Edit A (built against the now-superseded out-1) finally resolves.
+      resolveEdit(
+        jsonResponse(
+          {
+            jobId: 'job-1',
+            editId: 'edit-1',
+            versionId: 'v1',
+            project: PROJECT,
+            edit: { id: 'edit-1', status: 'succeeded', resultingAssetId: 'out-1-edited' },
+            outputAssetUrls: ['/assets/out-1-edited'],
+          },
+          { status: 201 },
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Edit' })).toBeInTheDocument());
+      expect(store.getState().latestOutputAssetId).toBe('out-2'); // must NOT be clobbered by the stale edit
+      expect(store.getState().latestGenerationOutputUrls).toEqual(['/assets/out-2']);
+    });
+
     it('shows the real error envelope, not a fake result, when the edit fails', async () => {
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       fetchMock.mockResolvedValueOnce(

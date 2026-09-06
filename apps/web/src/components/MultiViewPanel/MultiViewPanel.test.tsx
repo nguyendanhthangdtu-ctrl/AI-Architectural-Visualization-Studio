@@ -182,6 +182,40 @@ describe('MultiViewPanel — BUILD 15 Multi-View / Sync / Creative View', () => 
       expect(store.getState().latestGenerationOutputUrls).toEqual(['/assets/out-2']);
     });
 
+    it('BUILD 31 FIX: does not let a slow, now-stale view response overwrite a newer render that already completed', async () => {
+      let resolveView!: (v: Response) => void;
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveView = resolve; }));
+
+      const store = await renderReady();
+      fireEvent.change(screen.getByLabelText('Perspective'), { target: { value: "bird's eye" } });
+      fireEvent.click(screen.getByRole('button', { name: /generate view/i })); // View A starts, stays pending
+
+      // While View A is still in flight, a render (or another action) already completed.
+      store.setState({ latestGenerationId: 'gen-X', latestOutputAssetId: 'out-X', latestGenerationOutputUrls: ['/assets/out-X'] });
+
+      // View A finally resolves — but it's now stale relative to gen-X.
+      resolveView(
+        jsonResponse(
+          {
+            jobId: 'job-1',
+            viewId: 'view-1',
+            generationId: 'gen-2',
+            versionId: 'v2',
+            project: PROJECT,
+            view: { id: 'view-1', mode: 'sync' },
+            generation: { id: 'gen-2', status: 'succeeded', outputAssets: ['out-2'] },
+            outputAssetUrls: ['/assets/out-2'],
+          },
+          { status: 201 },
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Generate View' })).toBeInTheDocument());
+      expect(store.getState().latestGenerationId).toBe('gen-X'); // must NOT be clobbered by the stale view
+      expect(store.getState().latestOutputAssetId).toBe('out-X');
+    });
+
     it('BUILD 30 FIX: clears a stale QC result from the previous generation once a new view succeeds', async () => {
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       fetchMock.mockResolvedValueOnce(

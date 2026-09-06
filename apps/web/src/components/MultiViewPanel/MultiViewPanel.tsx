@@ -26,7 +26,7 @@ import styles from './MultiViewPanel.module.css';
  */
 export function MultiViewPanel() {
   const state = useProjectSessionState();
-  const { setState } = useProjectSessionActions();
+  const { setState, getState } = useProjectSessionActions();
   const [mode, setMode] = useState<ViewMode>('sync');
   const [height, setHeight] = useState('');
   const [lens, setLens] = useState('');
@@ -46,6 +46,13 @@ export function MultiViewPanel() {
 
   const handleGenerateView = async () => {
     if (!state.currentProject || !state.sourceImage || !baseRequest) return;
+
+    // BUILD 31 FIX — a real, verified race (same class as EditPanel's own
+    // fix): if the user renders, edits, or generates another view before
+    // this request resolves, a late response here must not silently
+    // overwrite whatever superseded it.
+    const generationIdAtRequestTime = state.latestGenerationId;
+    const outputAssetIdAtRequestTime = state.latestOutputAssetId;
 
     setViewStatus('loading');
     setViewError(undefined);
@@ -83,19 +90,22 @@ export function MultiViewPanel() {
         ignoredProposals,
       };
       const result = await runView(state.currentProject.id, params);
-      setState({
-        currentProject: result.project,
-        latestGenerationOutputUrls: result.outputAssetUrls,
-        latestGenerationId: result.generationId,
-        latestOutputAssetId: result.generation.outputAssets[0] ?? null,
-        // BUILD 30 FIX — same defect class as BUILD 28's Render fix
-        // (ModuleWorkspace.tsx): a View produces a genuinely new generation
-        // (a different `generationId`), but this previously left a
-        // PASS/FAIL QC result from the prior generation displayed as if it
-        // applied to the new view's output. QC is per-generation (docs/15).
-        qcState: null,
-        status: 'ready',
-      });
+      const current = getState();
+      if (current.latestGenerationId === generationIdAtRequestTime && current.latestOutputAssetId === outputAssetIdAtRequestTime) {
+        setState({
+          currentProject: result.project,
+          latestGenerationOutputUrls: result.outputAssetUrls,
+          latestGenerationId: result.generationId,
+          latestOutputAssetId: result.generation.outputAssets[0] ?? null,
+          // BUILD 30 FIX — same defect class as BUILD 28's Render fix
+          // (ModuleWorkspace.tsx): a View produces a genuinely new generation
+          // (a different `generationId`), but this previously left a
+          // PASS/FAIL QC result from the prior generation displayed as if it
+          // applied to the new view's output. QC is per-generation (docs/15).
+          qcState: null,
+          status: 'ready',
+        });
+      }
       setHeight('');
       setLens('');
       setPerspective('');

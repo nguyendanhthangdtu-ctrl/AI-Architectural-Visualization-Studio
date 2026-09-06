@@ -34,7 +34,7 @@ export interface ModuleWorkspaceProps {
  */
 export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
   const state = useProjectSessionState();
-  const { setState } = useProjectSessionActions();
+  const { setState, getState } = useProjectSessionActions();
   const [renderStatus, setRenderStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [renderError, setRenderError] = useState<ErrorEnvelope | undefined>(undefined);
 
@@ -42,6 +42,13 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
 
   const handleRender = async () => {
     if (!state.currentProject || !state.sourceImage || !state.scenario || !state.promptDraft.trim()) return;
+
+    // BUILD 31 FIX — a real, verified race (same class as EditPanel's and
+    // MultiViewPanel's own fixes): if an Edit or a View completes while this
+    // Render is still in flight, this Render's now-stale response must not
+    // silently overwrite that newer result.
+    const generationIdAtRequestTime = state.latestGenerationId;
+    const outputAssetIdAtRequestTime = state.latestOutputAssetId;
 
     setRenderStatus('loading');
     setRenderError(undefined);
@@ -58,20 +65,23 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
         scenarioVersion: state.scenario.normalizedAt,
       };
       const result = await runGeneration(state.currentProject.id, params);
-      setState({
-        currentProject: result.project,
-        latestGenerationOutputUrls: result.outputAssetUrls,
-        latestGenerationId: result.generationId,
-        latestOutputAssetId: result.generation.outputAssets[0] ?? null,
-        // BUILD 28 FIX — a real defect found via live browser QA: a fresh,
-        // never-verified render kept displaying the PREVIOUS generation's QC
-        // result (decision/scores), falsely implying the new output had
-        // already passed/failed QC. QC is per-generation (docs/15) — a new
-        // generation always starts with no QC verdict until Run QC is
-        // explicitly run against it again.
-        qcState: null,
-        status: 'ready',
-      });
+      const current = getState();
+      if (current.latestGenerationId === generationIdAtRequestTime && current.latestOutputAssetId === outputAssetIdAtRequestTime) {
+        setState({
+          currentProject: result.project,
+          latestGenerationOutputUrls: result.outputAssetUrls,
+          latestGenerationId: result.generationId,
+          latestOutputAssetId: result.generation.outputAssets[0] ?? null,
+          // BUILD 28 FIX — a real defect found via live browser QA: a fresh,
+          // never-verified render kept displaying the PREVIOUS generation's QC
+          // result (decision/scores), falsely implying the new output had
+          // already passed/failed QC. QC is per-generation (docs/15) — a new
+          // generation always starts with no QC verdict until Run QC is
+          // explicitly run against it again.
+          qcState: null,
+          status: 'ready',
+        });
+      }
       setRenderStatus('idle');
     } catch (error) {
       const envelope = toErrorEnvelope(error, 'Something went wrong generating the image.');
